@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: watermark-protection-system
+    runtime: python
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT app:app"
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: RENDER
+        value: "true"
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_INITIAL_PASSWORD
+        sync: false
+      - key: SETUP_TOKEN
+        sync: false

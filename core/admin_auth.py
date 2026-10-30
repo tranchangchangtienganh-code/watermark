@@ -1,19 +1,21 @@
 """
 Hệ thống Xác thực Quản Trị Viên (Admin Authentication System)
 Chịu trách nhiệm:
-1. Quản lý thiết lập mật khẩu lần đầu (Secure Initial Setup)
-2. Mã hóa và lưu trữ mật khẩu an toàn (Scrypt / Salted Password Hash)
-3. Giới hạn tần suất đăng nhập (Rate Limiting chống Brute-Force)
-4. Xác thực và đổi mật khẩu quản trị viên
-5. Tuyệt đối không lưu mật khẩu dạng plain-text hoặc công khai
+1. Quản lý thiết lập mật khẩu lần đầu (Secure Initial Setup & Anti-Exploit Protection)
+2. Tự động cấp quyền quản trị từ biến môi trường ADMIN_INITIAL_PASSWORD trên Render
+3. Bảo vệ quy trình thiết lập bằng SETUP_TOKEN trên môi trường sản xuất công khai
+4. Mã hóa và lưu trữ mật khẩu an toàn (Scrypt / Salted Password Hash)
+5. Giới hạn tần suất đăng nhập (Rate Limiting chống Brute-Force)
+6. Xác thực và đổi mật khẩu quản trị viên
 """
 import os
 import json
 import time
+import secrets
 from typing import Tuple, Dict, List, Optional
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
-from config import DATA_DIR
+from config import DATA_DIR, ADMIN_INITIAL_PASSWORD, SETUP_TOKEN, IS_PRODUCTION
 
 AUTH_FILE = DATA_DIR / "admin_auth.json"
 MAX_FAILED_ATTEMPTS = 5
@@ -23,10 +25,56 @@ class AdminAuthManager:
     """Quản lý xác thực và phân quyền cho Quản trị viên (Ms. Trang)"""
 
     _failed_attempts: Dict[str, List[float]] = {}
+    _ephemeral_setup_token: Optional[str] = None
+
+    @classmethod
+    def init_app(cls):
+        """Khởi tạo và đồng bộ quyền Quản trị viên khi ứng dụng khởi động"""
+        # Nếu có biến môi trường ADMIN_INITIAL_PASSWORD và chưa cấu hình -> Tự động khởi tạo ngay lập tức
+        if ADMIN_INITIAL_PASSWORD and not cls.is_configured():
+            cls.setup_admin(ADMIN_INITIAL_PASSWORD, bypass_token=True)
+            print("[BẢO MẬT] Đã tự động khởi tạo tài khoản Quản trị viên từ biến môi trường ADMIN_INITIAL_PASSWORD.")
+            return
+
+        # Nếu chưa cấu hình và trên môi trường Production mà không có SETUP_TOKEN trong env
+        # Tự động sinh One-Time Setup Token để ngăn chặn bất kỳ ai bên ngoài chiếm đoạt quyền quản trị
+        if not cls.is_configured() and not SETUP_TOKEN and IS_PRODUCTION:
+            token_file = DATA_DIR / ".setup_token"
+            if token_file.exists():
+                try:
+                    cls._ephemeral_setup_token = token_file.read_text(encoding="utf-8").strip()
+                except Exception:
+                    cls._ephemeral_setup_token = secrets.token_hex(16)
+            else:
+                cls._ephemeral_setup_token = secrets.token_hex(16)
+                try:
+                    token_file.write_text(cls._ephemeral_setup_token, encoding="utf-8")
+                except Exception:
+                    pass
+            print("=" * 60)
+            print("[CẢNH BÁO BẢO MẬT RENDER] Hệ thống chưa có mật khẩu Quản trị viên.")
+            print(f"[*] Mã kích hoạt thiết lập an toàn (One-Time Setup Token): {cls._ephemeral_setup_token}")
+            print("[*] Vui lòng sử dụng mã này trên giao diện hoặc đặt biến môi trường ADMIN_INITIAL_PASSWORD.")
+            print("=" * 60)
+
+    @classmethod
+    def get_required_setup_token(cls) -> Optional[str]:
+        """Trả về setup token bắt buộc nếu hệ thống yêu cầu mã xác minh khi thiết lập lần đầu"""
+        token = os.environ.get("SETUP_TOKEN") or SETUP_TOKEN
+        if token:
+            return token.strip()
+        if (IS_PRODUCTION or os.environ.get("RENDER") == "true") and cls._ephemeral_setup_token:
+            return cls._ephemeral_setup_token
+        return None
+
+    @classmethod
+    def is_setup_token_required(cls) -> bool:
+        """Kiểm tra xem hệ thống có yêu cầu mã token khi thiết lập lần đầu không"""
+        return bool(cls.get_required_setup_token())
 
     @classmethod
     def is_configured(cls) -> bool:
-        """Kiểm tra hệ thống đã được thiết lập mật khẩu quản trị viên ban đầu chưa"""
+        """Kiểm tra hệ thống đã được thiết lập mật khẩu quản trị viên chưa"""
         if not AUTH_FILE.exists():
             return False
         try:
@@ -44,7 +92,6 @@ class AdminAuthManager:
         """
         now = time.time()
         attempts = cls._failed_attempts.get(ip, [])
-        # Lọc các lần thử trong phạm vi LOCKOUT_DURATION_SECONDS
         recent = [t for t in attempts if now - t < LOCKOUT_DURATION_SECONDS]
         cls._failed_attempts[ip] = recent
 
@@ -70,14 +117,25 @@ class AdminAuthManager:
         cls._failed_attempts.pop(ip, None)
 
     @classmethod
-    def setup_admin(cls, password: str) -> Tuple[bool, str]:
+    def setup_admin(
+        cls,
+        password: str,
+        setup_token: Optional[str] = None,
+        bypass_token: bool = False
+    ) -> Tuple[bool, str]:
         """
         Thiết lập mật khẩu quản trị viên lần đầu:
+        - Kiểm tra mã bảo vệ setup token (chống khai thác trái phép trên Render công khai)
         - Sử dụng thuật toán băm scrypt với muối ngẫu nhiên
-        - Không lưu mật khẩu gốc
         """
         if cls.is_configured():
             return False, "Quản trị viên đã được thiết lập trước đó."
+
+        # Kiểm tra mã setup token nếu hệ thống yêu cầu
+        required_token = cls.get_required_setup_token()
+        if required_token and not bypass_token:
+            if not setup_token or not secrets.compare_digest(setup_token.strip(), required_token):
+                return False, "Mã kích hoạt thiết lập (Setup Token) không chính xác hoặc chưa được cung cấp."
 
         if not password or len(password.strip()) < 6:
             return False, "Mật khẩu quản trị viên phải có ít nhất 6 ký tự."
@@ -95,6 +153,15 @@ class AdminAuthManager:
         AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(AUTH_FILE, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, ensure_ascii=False, indent=2)
+
+        # Xóa token tạm thời nếu có
+        token_file = DATA_DIR / ".setup_token"
+        if token_file.exists():
+            try:
+                token_file.unlink()
+            except Exception:
+                pass
+        cls._ephemeral_setup_token = None
 
         return True, "Thiết lập mật khẩu quản trị viên thành công."
 
@@ -133,7 +200,7 @@ class AdminAuthManager:
         cls.record_failed_attempt(ip)
         _, rem, _ = cls.check_rate_limit(ip)
         if rem == 0:
-            return False, f"Mật khẩu không chính xác. Tài khoản tạm thời bị khóa 15 phút do nhập sai 5 lần."
+            return False, "Mật khẩu không chính xác. Tài khoản tạm thời bị khóa 15 phút do nhập sai 5 lần."
         return False, f"Mật khẩu không chính xác. Bạn còn {rem} lần thử trước khi bị tạm khóa."
 
     @classmethod

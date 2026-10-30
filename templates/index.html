@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <title>Hệ Thống Đóng Watermark & Bảo Vệ Bản Quyền | Ms. Trần Thị Thu Trang</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔒</text></svg>">
@@ -394,6 +395,14 @@
       </p>
 
       <form id="formAdminSetup">
+        <div class="form-group" id="setupTokenGroup" style="display: none;">
+          <label class="form-label">Mã Kích Hoạt Thiết Lập (Setup Token):</label>
+          <input type="password" id="inputSetupToken" class="form-input" placeholder="Nhập mã Setup Token nếu được cung cấp trên Render...">
+          <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
+            🔒 <em>Mã bảo mật chống chiếm đoạt quyền quản trị khi triển khai trên đám mây công khai.</em>
+          </p>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Mật Khẩu Mới:</label>
           <input type="password" id="inputSetupPassword" class="form-input" placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)..." required minlength="6">

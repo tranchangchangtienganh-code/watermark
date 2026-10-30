@@ -142,24 +142,37 @@ class SessionStorage:
     @classmethod
     def get_public_gallery(cls) -> list:
         """
-        Lấy danh sách các tệp đã hoàn thành watermark phục vụ người dùng xem & tải về
-        (Chỉ hiển thị các tệp đã đóng watermark hoàn chỉnh, bảo vệ tệp gốc)
+        Lấy danh sách các tệp đã hoàn thành watermark phục vụ người dùng xem & tải về.
+        Quét trực tiếp từ ổ lưu trữ để đảm bảo đồng bộ hoàn hảo giữa nhiều Gunicorn worker.
         """
         items = []
         now = time.time()
-        for session_id, s in list(cls._sessions_cache.items()):
-            if s.get("is_processed") and now <= s.get("expires_at", 0):
-                items.append({
-                    "session_id": session_id,
-                    "protected_filename": s.get("protected_filename"),
-                    "file_type": s.get("file_type"),
-                    "preview_url": f"/api/preview/{session_id}",
-                    "download_url": f"/api/download/{session_id}",
-                    "created_at": s.get("created_at"),
-                    "protected_sha256": s.get("protected_sha256"),
-                    "protected_size": s.get("protected_size")
-                })
-        # Sắp xếp mới nhất lên đầu
+        
+        # Đồng bộ từ ổ đĩa để hỗ trợ đa tiến trình Gunicorn (multi-worker support)
+        if SESSIONS_DIR.exists():
+            for folder in SESSIONS_DIR.iterdir():
+                if folder.is_dir():
+                    meta = folder / "meta.json"
+                    if meta.exists():
+                        try:
+                            with open(meta, "r", encoding="utf-8") as f:
+                                d = json.load(f)
+                            if d.get("is_processed") and now <= d.get("expires_at", 0):
+                                cls._sessions_cache[d["session_id"]] = d
+                                items.append({
+                                    "session_id": d["session_id"],
+                                    "protected_filename": d.get("protected_filename"),
+                                    "file_type": d.get("file_type"),
+                                    "preview_url": f"/api/preview/{d['session_id']}",
+                                    "download_url": f"/api/download/{d['session_id']}",
+                                    "created_at": d.get("created_at"),
+                                    "protected_sha256": d.get("protected_sha256"),
+                                    "protected_size": d.get("protected_size")
+                                })
+                            elif now > d.get("expires_at", 0):
+                                shutil.rmtree(folder, ignore_errors=True)
+                        except Exception:
+                            pass
         items.sort(key=lambda x: x.get("created_at", 0), reverse=True)
         return items
 

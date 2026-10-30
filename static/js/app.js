@@ -78,7 +78,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let selectedFile = null;
     let currentSessionData = null;
-    let currentAuthState = { is_configured: false, is_admin: false };
+    let currentAuthState = { is_configured: false, is_admin: false, setup_token_required: false };
+
+    function getCsrfToken() {
+        return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || "";
+    }
 
     // ==========================================
     // 2. KHỞI TẠO & ĐỒNG BỘ TRẠNG THÁI XÁC THỰC
@@ -105,6 +109,18 @@ document.addEventListener("DOMContentLoaded", () => {
             btnOpenLoginModal.style.display = "none";
             btnOpenChangePassModal.style.display = "none";
             btnLogout.style.display = "none";
+
+            const setupTokenGroup = document.getElementById("setupTokenGroup");
+            const inputSetupToken = document.getElementById("inputSetupToken");
+            if (setupTokenGroup && inputSetupToken) {
+                if (state.setup_token_required) {
+                    setupTokenGroup.style.display = "block";
+                    inputSetupToken.required = true;
+                } else {
+                    setupTokenGroup.style.display = "none";
+                    inputSetupToken.required = false;
+                }
+            }
 
             guestNoticeBanner.style.display = "flex";
             guestNoticeBanner.querySelector("h4").textContent = "Cần Thiết Lập Mật Khẩu Quản Trị Ban Đầu";
@@ -198,7 +214,10 @@ document.addEventListener("DOMContentLoaded", () => {
             try {
                 const res = await fetch("/api/auth/login", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": getCsrfToken()
+                    },
                     body: JSON.stringify({ password })
                 });
                 const data = await res.json();
@@ -237,6 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
             e.preventDefault();
             const password = document.getElementById("inputSetupPassword").value;
             const confirm = document.getElementById("inputSetupConfirm").value;
+            const setupToken = document.getElementById("inputSetupToken")?.value?.trim() || "";
 
             if (password !== confirm) {
                 showToast("Mật khẩu xác nhận không khớp.", "error");
@@ -246,8 +266,11 @@ document.addEventListener("DOMContentLoaded", () => {
             try {
                 const res = await fetch("/api/auth/setup", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ password, confirm_password: confirm })
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": getCsrfToken()
+                    },
+                    body: JSON.stringify({ password, confirm_password: confirm, setup_token: setupToken })
                 });
                 const data = await res.json();
 
@@ -268,7 +291,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnLogout) {
         btnLogout.addEventListener("click", async () => {
             try {
-                const res = await fetch("/api/auth/logout", { method: "POST" });
+                const res = await fetch("/api/auth/logout", {
+                    method: "POST",
+                    headers: {
+                        "X-CSRF-Token": getCsrfToken()
+                    }
+                });
                 const data = await res.json();
                 if (data.success) {
                     showToast("Đã đăng xuất khỏi phiên quản trị viên.", "info");
@@ -311,7 +339,10 @@ document.addEventListener("DOMContentLoaded", () => {
             try {
                 const res = await fetch("/api/auth/change-password", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRF-Token": getCsrfToken()
+                    },
                     body: JSON.stringify({
                         current_password: currentPassword,
                         new_password: newPassword,
@@ -497,6 +528,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const response = await fetch("/api/process", {
                 method: "POST",
+                headers: {
+                    "X-CSRF-Token": getCsrfToken()
+                },
                 body: formData
             });
 
@@ -654,6 +688,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 try {
                     const res = await fetch("/api/verify-integrity", {
                         method: "POST",
+                        headers: {
+                            "X-CSRF-Token": getCsrfToken()
+                        },
                         body: form
                     });
                     const d = await res.json();

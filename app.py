@@ -12,6 +12,8 @@ Kiến trúc 4 khối liên kết:
 import os
 import sys
 import time
+import secrets
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -23,22 +25,80 @@ if hasattr(sys.stdout, "reconfigure"):
 from flask import Flask, request, jsonify, render_template, send_file, abort, session
 from config import (
     SECRET_KEY, HOST, PORT, MAX_CONTENT_LENGTH,
-    DEFAULT_WATERMARK_TEXT, DEFAULT_SUB_TEXT, DEFAULT_GRAY_COLOR_HEX
+    DEFAULT_WATERMARK_TEXT, DEFAULT_SUB_TEXT, DEFAULT_GRAY_COLOR_HEX,
+    IS_PRODUCTION
 )
 from core import SecurityMiddleware, WatermarkController, SessionStorage, AdminAuthManager, admin_required
 
 app = Flask(__name__)
+
+# Hỗ trợ HTTPS và Reverse Proxy chuẩn công nghiệp (Render, Nginx, Cloudflare)
+app.wsgi_app = ProxyFix(
+    app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
+)
+
+app.config["DEBUG"] = False
 app.config["SECRET_KEY"] = SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = 7200  # 2 giờ
 
+# Kích hoạt Secure Cookie khi chạy trên môi trường đám mây có HTTPS
+if IS_PRODUCTION:
+    app.config["SESSION_COOKIE_SECURE"] = (
+        os.environ.get("SESSION_COOKIE_SECURE", "true").lower() == "true"
+    )
+else:
+    app.config["SESSION_COOKIE_SECURE"] = False
+
+# Khởi tạo quyền quản trị và cơ chế bảo vệ First-Run
+AdminAuthManager.init_app()
+
 def get_client_ip() -> str:
-    """Lấy địa chỉ IP thực tế của máy khách (hỗ trợ reverse proxy nếu có)"""
-    if request.headers.get("X-Forwarded-For"):
-        return request.headers.get("X-Forwarded-For").split(",")[0].strip()
+    """Lấy địa chỉ IP thực tế của máy khách (đã qua ProxyFix an toàn)"""
     return request.remote_addr or "127.0.0.1"
+
+# ==========================================================
+# CƠ CHẾ BẢO VỆ CSRF (Cross-Site Request Forgery Protection)
+# ==========================================================
+@app.before_request
+def csrf_protect():
+    """Bảo vệ chống tấn công CSRF cho tất cả các yêu cầu thay đổi trạng thái"""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+
+    if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
+        # Bỏ qua kiểm tra CSRF trong bộ test suite tự động nếu tắt
+        if app.config.get("TESTING") and not app.config.get("WTF_CSRF_ENABLED", True):
+            return
+
+        header_token = request.headers.get("X-CSRF-Token")
+        form_token = request.form.get("csrf_token") if request.form else None
+        expected_token = session.get("csrf_token")
+
+        if not expected_token or (header_token != expected_token and form_token != expected_token):
+            return jsonify({
+                "success": False,
+                "error": "Yêu cầu bảo mật thất bại (CSRF token không hợp lệ hoặc đã hết hạn). Vui lòng làm mới trang.",
+                "csrf_invalid": True
+            }), 403
+
+@app.context_processor
+def inject_csrf_token():
+    """Tự động cung cấp csrf_token cho giao diện HTML"""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return dict(csrf_token=session["csrf_token"])
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Xử lý lỗi vượt quá dung lượng cho phép"""
+    return jsonify({
+        "success": False,
+        "node": "middleware-security",
+        "error": f"Dung lượng tệp tải lên vượt quá giới hạn an toàn ({MAX_CONTENT_LENGTH // (1024*1024)}MB)."
+    }), 413
 
 # ==========================================================
 # 1. GIAO DIỆN CHÍNH (client-upload)
@@ -59,12 +119,13 @@ def auth_status():
     return jsonify({
         "success": True,
         "is_configured": AdminAuthManager.is_configured(),
-        "is_admin": session.get("is_admin", False)
+        "is_admin": session.get("is_admin", False),
+        "setup_token_required": AdminAuthManager.is_setup_token_required()
     })
 
 @app.route("/api/auth/setup", methods=["POST"])
 def auth_setup():
-    """Thiết lập mật khẩu quản trị viên ban đầu qua quy trình an toàn"""
+    """Thiết lập mật khẩu quản trị viên ban đầu qua quy trình an toàn có bảo vệ token"""
     if AdminAuthManager.is_configured():
         return jsonify({
             "success": False,
@@ -74,6 +135,7 @@ def auth_setup():
     data = request.get_json(silent=True) or request.form
     password = data.get("password", "").strip()
     confirm = data.get("confirm_password", "").strip()
+    setup_token = data.get("setup_token", "").strip() or None
 
     if not password or len(password) < 6:
         return jsonify({"success": False, "error": "Mật khẩu quản trị viên phải có ít nhất 6 ký tự."}), 400
@@ -81,7 +143,7 @@ def auth_setup():
     if password != confirm:
         return jsonify({"success": False, "error": "Mật khẩu xác nhận không khớp."}), 400
 
-    success, message = AdminAuthManager.setup_admin(password)
+    success, message = AdminAuthManager.setup_admin(password, setup_token=setup_token)
     if success:
         session["is_admin"] = True
         session["admin_logged_in_at"] = time.time()

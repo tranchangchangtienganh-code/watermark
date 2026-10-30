@@ -319,5 +319,91 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
                 "confirm_password": TEST_PASSWORD
             })
 
+    # ==========================================================
+    # TIÊU CHÍ RENDER DEPLOYMENT & PRODUCTION SECURITY
+    # ==========================================================
+    def test_09_csrf_protection_enforcement(self):
+        """Kiểm thử cơ chế bảo vệ chống tấn công CSRF (Cross-Site Request Forgery)"""
+        with self.client as client:
+            app.config["WTF_CSRF_ENABLED"] = True
+            try:
+                # 1. Truy cập trang chủ để tạo session và nhận csrf_token
+                res = client.get("/")
+                self.assertEqual(res.status_code, 200)
+
+                # 2. Gửi request POST mà KHÔNG có header X-CSRF-Token -> PHẢI BỊ 403 FORBIDDEN
+                res_blocked = client.post("/api/auth/login", json={"password": TEST_PASSWORD})
+                self.assertEqual(res_blocked.status_code, 403)
+                self.assertTrue(res_blocked.get_json().get("csrf_invalid"))
+
+                # 3. Lấy csrf_token từ session và gửi kèm trong header X-CSRF-Token -> PHẢI HỢP LỆ
+                with client.session_transaction() as sess:
+                    valid_token = sess.get("csrf_token")
+                self.assertIsNotNone(valid_token)
+
+                res_allowed = client.post(
+                    "/api/auth/login",
+                    json={"password": TEST_PASSWORD},
+                    headers={"X-CSRF-Token": valid_token}
+                )
+                self.assertEqual(res_allowed.status_code, 200)
+            finally:
+                app.config["WTF_CSRF_ENABLED"] = False
+
+    def test_10_first_run_setup_token_protection(self):
+        """Kiểm thử bảo vệ First-Run Setup: Không cho phép chiếm quyền nếu mã Setup Token sai"""
+        import config
+        from core.admin_auth import AdminAuthManager, AUTH_FILE
+
+        # Giả lập chưa cấu hình và có SETUP_TOKEN bảo vệ
+        old_env_token = os.environ.get("SETUP_TOKEN")
+        os.environ["SETUP_TOKEN"] = "RenderSecureSetupToken2026!"
+        
+        # Xóa tạm auth file
+        backup_auth = None
+        if AUTH_FILE.exists():
+            backup_auth = AUTH_FILE.read_text(encoding="utf-8")
+            AUTH_FILE.unlink()
+
+        try:
+            # 1. Thử setup với token sai -> Thất bại
+            success, msg = AdminAuthManager.setup_admin("Password123!", setup_token="WrongToken")
+            self.assertFalse(success)
+            self.assertIn("Setup Token", msg)
+
+            # 2. Thử setup với token đúng -> Thành công
+            success_ok, msg_ok = AdminAuthManager.setup_admin("Password123!", setup_token="RenderSecureSetupToken2026!")
+            self.assertTrue(success_ok)
+        finally:
+            if old_env_token is not None:
+                os.environ["SETUP_TOKEN"] = old_env_token
+            else:
+                os.environ.pop("SETUP_TOKEN", None)
+            if backup_auth:
+                AUTH_FILE.write_text(backup_auth, encoding="utf-8")
+            else:
+                AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
+
+    def test_11_proxy_fix_https_and_forwarding(self):
+        """Kiểm thử hoạt động sau Reverse Proxy (Render) với headers X-Forwarded-*"""
+        with self.client as client:
+            res = client.get(
+                "/api/system-status",
+                headers={
+                    "X-Forwarded-Proto": "https",
+                    "X-Forwarded-For": "203.0.113.195",
+                    "X-Forwarded-Host": "watermark.onrender.com"
+                }
+            )
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["status"], "online")
+
+    def test_12_production_wsgi_app_exposed(self):
+        """Kiểm thử ứng dụng WSGI app:app tương thích hoàn hảo với Gunicorn"""
+        from app import app as wsgi_app
+        self.assertTrue(callable(wsgi_app), "app.py phải expose đối tượng WSGI callable tên 'app'")
+        self.assertFalse(wsgi_app.config["DEBUG"], "Flask debug mode phải tắt trong production")
+
 if __name__ == "__main__":
     unittest.main()
