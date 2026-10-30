@@ -12,13 +12,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Phân quyền & Điều hướng
     const authStatusBadge = document.getElementById("authStatusBadge");
     const authStatusText = document.getElementById("authStatusText");
-    const btnOpenLoginModal = document.getElementById("btnOpenLoginModal");
-    const btnOpenSetupModal = document.getElementById("btnOpenSetupModal");
-    const btnOpenChangePassModal = document.getElementById("btnOpenChangePassModal");
-    const btnLogout = document.getElementById("btnLogout");
     const pipelineRoleNote = document.getElementById("pipelineRoleNote");
-    const guestNoticeBanner = document.getElementById("guestNoticeBanner");
-    const btnBannerLogin = document.getElementById("btnBannerLogin");
+    const unconfiguredNoticeBanner = document.getElementById("unconfiguredNoticeBanner");
     const editorContentWrapper = document.getElementById("editorContentWrapper");
     const editorCardTitle = document.getElementById("editorCardTitle");
 
@@ -59,22 +54,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const nodeSecurity = document.getElementById("node-security");
     const nodeWatermark = document.getElementById("node-watermark");
     const nodeStorage = document.getElementById("node-storage");
-
-    // Modals
-    const modalAdminLogin = document.getElementById("modalAdminLogin");
-    const btnCloseLoginModal = document.getElementById("btnCloseLoginModal");
-    const formAdminLogin = document.getElementById("formAdminLogin");
-    const inputAdminPassword = document.getElementById("inputAdminPassword");
-    const btnToggleLoginPass = document.getElementById("btnToggleLoginPass");
-    const loginRateWarning = document.getElementById("loginRateWarning");
-
-    const modalAdminSetup = document.getElementById("modalAdminSetup");
-    const btnCloseSetupModal = document.getElementById("btnCloseSetupModal");
-    const formAdminSetup = document.getElementById("formAdminSetup");
-
-    const modalChangePassword = document.getElementById("modalChangePassword");
-    const btnCloseChangePassModal = document.getElementById("btnCloseChangePassModal");
-    const formChangePassword = document.getElementById("formChangePassword");
 
     let selectedFile = null;
     let currentSessionData = null;
@@ -128,91 +107,57 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function applyAuthState(state) {
         if (!state.is_configured) {
-            // Trường hợp 1: Chưa thiết lập quản trị viên lần đầu
+            // Trường hợp 1: Chưa cấu hình bảo mật website riêng tư trên production
             authStatusBadge.className = "badge-admin-status badge-guest-active";
             authStatusBadge.querySelector(".status-dot").style.background = "#f59e0b";
+            authStatusText.textContent = "🔒 Chưa Cấu Hình Bảo Mật";
 
-            if (state.setup_locked) {
-                // Khóa chống chiếm đoạt quyền trên môi trường công khai
-                authStatusText.textContent = "Khởi Tạo Đang Bị Khóa";
-                btnOpenSetupModal.style.display = "none";
-                btnOpenLoginModal.style.display = "none";
-                btnOpenChangePassModal.style.display = "none";
-                btnLogout.style.display = "none";
-
-                guestNoticeBanner.style.display = "flex";
-                guestNoticeBanner.querySelector("h4").textContent = "Quy Trình Khởi Tạo Đang Bị Khóa (Anti-Hijacking)";
-                guestNoticeBanner.querySelector("p").textContent = "Hệ thống đang chạy chế độ bảo vệ chống chiếm đoạt quyền. Chủ sở hữu vui lòng đặt biến môi trường ADMIN_INITIAL_PASSWORD hoặc SETUP_TOKEN trong Render Dashboard (Environment tab) để kích hoạt quyền quản trị an toàn.";
-                btnBannerLogin.style.display = "none";
-            } else {
-                authStatusText.textContent = "Chưa Thiết Lập Quản Trị";
-                btnOpenSetupModal.style.display = "inline-flex";
-                btnOpenLoginModal.style.display = "none";
-                btnOpenChangePassModal.style.display = "none";
-                btnLogout.style.display = "none";
-
-                const setupTokenGroup = document.getElementById("setupTokenGroup");
-                const inputSetupToken = document.getElementById("inputSetupToken");
-                if (setupTokenGroup && inputSetupToken) {
-                    if (state.setup_token_required) {
-                        setupTokenGroup.style.display = "block";
-                        inputSetupToken.required = true;
-                    } else {
-                        setupTokenGroup.style.display = "none";
-                        inputSetupToken.required = false;
-                    }
+            if (unconfiguredNoticeBanner) {
+                unconfiguredNoticeBanner.style.display = "flex";
+                if (state.configuration_error) {
+                    const txt = document.getElementById("unconfiguredNoticeText");
+                    if (txt) txt.textContent = state.configuration_error;
                 }
-
-                guestNoticeBanner.style.display = "flex";
-                guestNoticeBanner.querySelector("h4").textContent = "Cần Thiết Lập Mật Khẩu Quản Trị Ban Đầu";
-                guestNoticeBanner.querySelector("p").textContent = "Hệ thống chưa có mật khẩu quản trị viên. Vui lòng bấm nút bên dưới để thiết lập mật khẩu bảo mật của Ms. Trang.";
-                btnBannerLogin.style.display = "inline-flex";
-                btnBannerLogin.textContent = "🚀 Thiết Lập Quản Trị Viên Ngay";
-                btnBannerLogin.onclick = () => { modalAdminSetup.style.display = "flex"; };
             }
 
             editorContentWrapper.classList.add("form-disabled");
-            pipelineRoleNote.textContent = "Chưa thiết lập Quản trị viên (Khóa chế độ chỉnh sửa)";
-            editorCardTitle.textContent = "Cấu Hình Watermark (Đang Khóa Chờ Thiết Lập)";
+            pipelineRoleNote.textContent = "Hệ thống đang khóa (Chưa cấu hình xác thực bảo mật website riêng tư)";
+            editorCardTitle.textContent = "Cấu Hình Watermark (Đang Khóa Chờ Cấu Hình)";
+            btnSubmit.disabled = true;
 
         } else if (state.is_admin) {
-            // Trường hợp 2: Đã đăng nhập Quản trị viên (Full Control)
+            // Trường hợp 2: Đã xác thực quyền Chủ sở hữu qua website riêng tư (Full Control)
             authStatusBadge.className = "badge-admin-status badge-admin-active";
             authStatusBadge.querySelector(".status-dot").style.background = "#10b981";
-            authStatusText.textContent = "👑 Quản Trị Viên (Ms. Trang)";
-            btnOpenSetupModal.style.display = "none";
-            btnOpenLoginModal.style.display = "none";
-            btnOpenChangePassModal.style.display = "inline-flex";
-            btnLogout.style.display = "inline-flex";
+            authStatusText.textContent = "👑 Chủ Sở Hữu (Ms. Trang) • Đã Xác Thực";
 
-            guestNoticeBanner.style.display = "none";
+            if (unconfiguredNoticeBanner) {
+                unconfiguredNoticeBanner.style.display = "none";
+            }
+
             editorContentWrapper.classList.remove("form-disabled");
-            pipelineRoleNote.textContent = "Quyền Quản trị viên: Toàn quyền chỉnh sửa, thay thế ảnh và đóng watermark";
-            editorCardTitle.textContent = "Cấu Hình Watermark & Tải Lên Tệp (Quản Trị Viên)";
+            pipelineRoleNote.textContent = "Quyền Chủ sở hữu: Toàn quyền chỉnh sửa, tải lên tệp và đóng watermark";
+            editorCardTitle.textContent = "Cấu Hình Watermark & Tải Lên Tệp (Ms. Trần Thị Thu Trang)";
+            btnSubmit.disabled = !selectedFile;
 
             if (currentSessionData && btnDownloadOriginal) {
                 btnDownloadOriginal.style.display = "inline-flex";
             }
 
         } else {
-            // Trường hợp 3: Khách công cộng chưa đăng nhập (Read-Only)
+            // Trường hợp 3: Khách công cộng chưa xác thực qua website riêng tư (Read-Only)
             authStatusBadge.className = "badge-admin-status badge-guest-active";
             authStatusBadge.querySelector(".status-dot").style.background = "#64748b";
-            authStatusText.textContent = "👤 Khách (Chế độ Chỉ Đọc)";
-            btnOpenSetupModal.style.display = "none";
-            btnOpenLoginModal.style.display = "inline-flex";
-            btnOpenChangePassModal.style.display = "none";
-            btnLogout.style.display = "none";
+            authStatusText.textContent = "👤 Khách Xem (Chế Độ Chỉ Đọc)";
 
-            guestNoticeBanner.style.display = "flex";
-            guestNoticeBanner.querySelector("h4").textContent = "Chế Độ Xem & Tải Về Công Khai (Read-Only Access)";
-            guestNoticeBanner.querySelector("p").textContent = "Chỉ Quản trị viên (Ms. Trang) mới có quyền thêm, sửa, thay đổi vị trí, màu sắc watermark hoặc thay thế ảnh/tệp gốc. Người xem công cộng chỉ được phép xem và tải về bản thành phẩm có watermark vĩnh viễn.";
-            btnBannerLogin.textContent = "🔑 Đăng Nhập Quản Trị Viên Để Mở Khóa Chỉnh Sửa";
-            btnBannerLogin.onclick = () => { modalAdminLogin.style.display = "flex"; };
+            if (unconfiguredNoticeBanner) {
+                unconfiguredNoticeBanner.style.display = "none";
+            }
 
             editorContentWrapper.classList.add("form-disabled");
-            pipelineRoleNote.textContent = "Chế độ Khách: Chỉ xem & tải về bản thành phẩm (Cấm chỉnh sửa cài đặt watermark)";
+            pipelineRoleNote.textContent = "Chế độ Khách: Chỉ xem & tải về bản thành phẩm (Cấm chỉnh sửa)";
             editorCardTitle.textContent = "Cấu Hình Watermark (Khóa Chỉnh Sửa - Chỉ Đọc)";
+            btnSubmit.disabled = true;
 
             if (btnDownloadOriginal) {
                 btnDownloadOriginal.style.display = "none";
@@ -221,219 +166,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ==========================================
-    // 3. XỬ LÝ ĐĂNG NHẬP, THIẾT LẬP & ĐĂNG XUẤT
-    // ==========================================
-    // Mở Modal Đăng Nhập
-    if (btnOpenLoginModal) {
-        btnOpenLoginModal.addEventListener("click", () => {
-            loginRateWarning.style.display = "none";
-            inputAdminPassword.value = "";
-            modalAdminLogin.style.display = "flex";
-            inputAdminPassword.focus();
-        });
-    }
-
-    if (btnCloseLoginModal) {
-        btnCloseLoginModal.addEventListener("click", () => {
-            modalAdminLogin.style.display = "none";
-        });
-    }
-
-    if (btnToggleLoginPass) {
-        btnToggleLoginPass.addEventListener("click", () => {
-            const isPass = inputAdminPassword.type === "password";
-            inputAdminPassword.type = isPass ? "text" : "password";
-            btnToggleLoginPass.textContent = isPass ? "👁️‍🗨️" : "👁️";
-        });
-    }
-
-    // Submit Đăng Nhập
-    if (formAdminLogin) {
-        formAdminLogin.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const password = inputAdminPassword.value.trim();
-            if (!password) return;
-
-            try {
-                const csrf = await ensureCsrfToken();
-                const res = await fetch("/api/auth/login", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrf
-                    },
-                    body: JSON.stringify({ password })
-                });
-                const data = await res.json();
-
-                if (data.success) {
-                    modalAdminLogin.style.display = "none";
-                    showToast("Đăng nhập quyền Quản trị viên thành công!", "success");
-                    await checkAuthStatus();
-                } else {
-                    loginRateWarning.textContent = data.error || "Mật khẩu không chính xác.";
-                    loginRateWarning.style.display = "block";
-                    showToast(data.error || "Đăng nhập thất bại.", "error");
-                }
-            } catch (err) {
-                showToast("Lỗi kết nối máy chủ: " + err.message, "error");
-            }
-        });
-    }
-
-    // Toggle ẩn/hiện Setup Token
-    const btnToggleSetupToken = document.getElementById("btnToggleSetupToken");
-    if (btnToggleSetupToken) {
-        btnToggleSetupToken.addEventListener("click", () => {
-            const input = document.getElementById("inputSetupToken");
-            if (input) {
-                const isPass = input.type === "password";
-                input.type = isPass ? "text" : "password";
-                btnToggleSetupToken.textContent = isPass ? "👁️‍🗨️" : "👁️";
-            }
-        });
-    }
-
-    // Mở Modal Thiết Lập Ban Đầu
-    if (btnOpenSetupModal) {
-        btnOpenSetupModal.addEventListener("click", () => {
-            modalAdminSetup.style.display = "flex";
-        });
-    }
-
-    if (btnCloseSetupModal) {
-        btnCloseSetupModal.addEventListener("click", () => {
-            modalAdminSetup.style.display = "none";
-        });
-    }
-
-    // Submit Thiết Lập Ban Đầu
-    if (formAdminSetup) {
-        formAdminSetup.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const password = document.getElementById("inputSetupPassword").value;
-            const confirm = document.getElementById("inputSetupConfirm").value;
-            const setupToken = document.getElementById("inputSetupToken")?.value?.trim() || "";
-
-            if (password !== confirm) {
-                showToast("Mật khẩu xác nhận không khớp.", "error");
-                return;
-            }
-
-            try {
-                const csrf = await ensureCsrfToken();
-                const res = await fetch("/api/auth/setup", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrf
-                    },
-                    body: JSON.stringify({ password, confirm_password: confirm, setup_token: setupToken })
-                });
-                const data = await res.json();
-
-                if (data.success) {
-                    modalAdminSetup.style.display = "none";
-                    showToast("Khởi tạo quản trị viên thành công! Bạn đã đăng nhập.", "success");
-                    await checkAuthStatus();
-                } else {
-                    showToast(data.error || "Không thể thiết lập.", "error");
-                }
-            } catch (err) {
-                showToast("Lỗi kết nối: " + err.message, "error");
-            }
-        });
-    }
-
-    // Đăng Xuất
-    if (btnLogout) {
-        btnLogout.addEventListener("click", async () => {
-            try {
-                const csrf = await ensureCsrfToken();
-                const res = await fetch("/api/auth/logout", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "X-CSRF-Token": csrf
-                    }
-                });
-                const data = await res.json();
-                if (data.success) {
-                    showToast("Đã đăng xuất khỏi phiên làm việc.", "info");
-                    await checkAuthStatus();
-                }
-            } catch (err) {
-                showToast("Lỗi đăng xuất: " + err.message, "error");
-            }
-        });
-    }
-
-    // Đổi Mật Khẩu
-    if (btnOpenChangePassModal) {
-        btnOpenChangePassModal.addEventListener("click", () => {
-            document.getElementById("inputCurrentPass").value = "";
-            document.getElementById("inputNewPass").value = "";
-            document.getElementById("inputConfirmNewPass").value = "";
-            modalChangePassword.style.display = "flex";
-        });
-    }
-
-    if (btnCloseChangePassModal) {
-        btnCloseChangePassModal.addEventListener("click", () => {
-            modalChangePassword.style.display = "none";
-        });
-    }
-
-    if (formChangePassword) {
-        formChangePassword.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const currentPassword = document.getElementById("inputCurrentPass").value;
-            const newPassword = document.getElementById("inputNewPass").value;
-            const confirmNewPassword = document.getElementById("inputConfirmNewPass").value;
-
-            if (newPassword !== confirmNewPassword) {
-                showToast("Mật khẩu mới xác nhận không khớp.", "error");
-                return;
-            }
-
-            try {
-                const csrf = await ensureCsrfToken();
-                const res = await fetch("/api/auth/change-password", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": csrf
-                    },
-                    body: JSON.stringify({
-                        current_password: currentPassword,
-                        new_password: newPassword,
-                        confirm_password: confirmNewPassword
-                    })
-                });
-                const data = await res.json();
-
-                if (data.success) {
-                    modalChangePassword.style.display = "none";
-                    showToast("Đổi mật khẩu quản trị viên thành công!", "success");
-                } else {
-                    showToast(data.error || "Không thể đổi mật khẩu.", "error");
-                }
-            } catch (err) {
-                showToast("Lỗi: " + err.message, "error");
-            }
-        });
-    }
-
-    // ==========================================
-    // 4. QUẢN LÝ TẢI LÊN TỆP & KÉO THẢ (Admin Only)
+    // 3. QUẢN LÝ TẢI LÊN TỆP & KÉO THẢ (Chủ Sở Hữu)
     // ==========================================
     dropzone.addEventListener("click", () => {
         if (!currentAuthState.is_admin) {
-            showToast("Vui lòng đăng nhập Quản trị viên để tải lên tệp mới.", "error");
-            modalAdminLogin.style.display = "flex";
+            showToast("Vui lòng truy cập qua website riêng tư đã xác thực của Ms. Trang để tải lên tệp.", "warning");
             return;
         }
         fileInput.click();
@@ -454,10 +191,13 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         dropzone.classList.remove("dragover");
         if (!currentAuthState.is_admin) {
-            showToast("Vui lòng đăng nhập Quản trị viên để tải lên tệp.", "error");
-            modalAdminLogin.style.display = "flex";
+            showToast("Vui lòng truy cập qua website riêng tư đã xác thực của Ms. Trang để tải lên tệp.", "warning");
             return;
         }
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFileSelect(e.dataTransfer.files[0]);
+        }
+    });
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             handleFileSelect(e.dataTransfer.files[0]);
         }
@@ -560,8 +300,7 @@ document.addEventListener("DOMContentLoaded", () => {
     formConfig.addEventListener("submit", async (e) => {
         e.preventDefault();
         if (!currentAuthState.is_admin) {
-            showToast("Bạn không có quyền chỉnh sửa watermark. Vui lòng đăng nhập Quản trị viên.", "error");
-            modalAdminLogin.style.display = "flex";
+            showToast("Vui lòng truy cập qua website riêng tư đã xác thực của Ms. Trang để chỉnh sửa.", "error");
             return;
         }
 
@@ -603,9 +342,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await response.json();
 
             if (!data.success) {
-                if (response.status === 401 || data.requires_auth) {
-                    modalAdminLogin.style.display = "flex";
-                }
                 throw new Error(data.error || "Có lỗi xảy ra trong quá trình xử lý.");
             }
 
@@ -796,10 +532,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     window.addEventListener("click", (e) => {
-        if (e.target === modalIntegrity) modalIntegrity.style.display = "none";
-        if (e.target === modalAdminLogin) modalAdminLogin.style.display = "none";
-        if (e.target === modalAdminSetup) modalAdminSetup.style.display = "none";
-        if (e.target === modalChangePassword) modalChangePassword.style.display = "none";
+        if (modalIntegrity && e.target === modalIntegrity) modalIntegrity.style.display = "none";
     });
 
     // Bắt đầu kiểm tra trạng thái xác thực

@@ -71,13 +71,19 @@ def check_private_site_access():
         if request.method == "OPTIONS":
             return
         auth = request.authorization
-        if auth and auth.username == BASIC_AUTH_USERNAME and auth.password == BASIC_AUTH_PASSWORD:
+        if auth and secrets.compare_digest(auth.username, BASIC_AUTH_USERNAME) and secrets.compare_digest(auth.password, BASIC_AUTH_PASSWORD):
+            session["is_admin"] = True
+            session.permanent = True
+            session.modified = True
             return
-        # Cho phép nếu đã có phiên admin hoặc mang X-Owner-Key hợp lệ
+        # Cho phép nếu đã có phiên admin
         if session.get("is_admin"):
             return
-        key = request.headers.get("X-Owner-Key")
-        if key and AdminAuthManager.validate_owner_key(key):
+        # Cho phép nếu yêu cầu đến từ Netlify private proxy hoặc mang header hợp lệ
+        if AdminAuthManager.verify_private_site_request(request):
+            session["is_admin"] = True
+            session.permanent = True
+            session.modified = True
             return
         return ("Trang web riêng tư của Ms. Trang. Vui lòng nhập thông tin xác thực.", 401, {
             "WWW-Authenticate": 'Basic realm="Private Watermark System"'
@@ -152,13 +158,14 @@ def request_entity_too_large(error):
 # ==========================================================
 @app.route("/")
 def index():
-    """Giao diện chính: Tự động thích ứng chế độ Khách (Read-Only) hoặc Quản trị viên (Full Edit)"""
-    if session.get("is_admin"):
+    """Giao diện chính: Tự động kích hoạt quyền Chủ sở hữu khi truy cập qua website riêng tư"""
+    if AdminAuthManager.verify_private_site_request(request):
+        session["is_admin"] = True
         session.permanent = True
         session.modified = True
 
     is_admin = session.get("is_admin", False)
-    is_configured = AdminAuthManager.is_configured()
+    is_configured = AdminAuthManager.is_security_configured()
     return render_template("index.html", is_admin=is_admin, is_configured=is_configured)
 
 # ==========================================================
@@ -170,26 +177,33 @@ def auth_status():
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_hex(32)
 
-    # Nếu phiên đang đăng nhập, tự động gia hạn an toàn (Sliding Renewal)
-    if session.get("is_admin"):
+    # 1. Kiểm tra xem bảo mật website riêng tư đã được cấu hình chưa
+    is_configured = AdminAuthManager.is_security_configured()
+    if not is_configured:
+        return jsonify({
+            "success": True,
+            "is_configured": False,
+            "is_admin": False,
+            "auth_mode": "unconfigured",
+            "configuration_error": "Chưa cấu hình xác thực bảo mật website riêng tư. Vui lòng thiết lập biến môi trường trên Render hoặc Netlify.",
+            "setup_token_required": False,
+            "setup_locked": True,
+            "csrf_token": session.get("csrf_token")
+        })
+
+    # 2. Tự động xác thực danh tính Chủ sở hữu tại tầng Website / Private Proxy
+    if AdminAuthManager.verify_private_site_request(request):
+        session["is_admin"] = True
         session.permanent = True
         session.modified = True
-    else:
-        # Hỗ trợ xác thực qua Authorization Bearer hoặc X-Owner-Key header (TUYỆT ĐỐI KHÔNG dùng URL query)
-        auth_header = request.headers.get("Authorization", "")
-        bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
-        header_key = request.headers.get("X-Owner-Key") or bearer_key
-        if header_key and AdminAuthManager.validate_owner_key(header_key):
-            session["is_admin"] = True
-            session.permanent = True
-            session.modified = True
 
     return jsonify({
         "success": True,
-        "is_configured": AdminAuthManager.is_configured(),
+        "is_configured": True,
         "is_admin": session.get("is_admin", False),
-        "setup_token_required": AdminAuthManager.is_setup_token_required(),
-        "setup_locked": AdminAuthManager.is_setup_locked(),
+        "auth_mode": "private_site",
+        "setup_token_required": False,
+        "setup_locked": False,
         "csrf_token": session.get("csrf_token")
     })
 

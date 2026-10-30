@@ -14,6 +14,7 @@ import io
 import json
 import shutil
 import unittest
+from unittest.mock import patch
 import pymupdf
 import docx
 from PIL import Image
@@ -849,7 +850,7 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
             # 1. Đăng nhập hợp lệ
             res_login = client.post("/api/auth/login", json={"password": TEST_PASSWORD})
             self.assertEqual(res_login.status_code, 200)
-            self.assertTrue(res_login.get_json()["is_admin"])
+            self.assertTrue(res_login.get_login_data()["is_admin"] if hasattr(res_login, "get_login_data") else res_login.get_json()["is_admin"])
 
             # 2. Truy cập /api/auth/status trong phiên hoạt động
             res_status = client.get("/api/auth/status")
@@ -859,6 +860,95 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
             # 3. Đảm bảo session cookie vẫn duy trì quyền quản trị hợp lệ
             res_process_check = client.get("/api/auth/status")
             self.assertTrue(res_process_check.get_json()["is_admin"], "Phiên phải duy trì quyền admin qua các tương tác")
+
+    # ==========================================================
+    # TIÊU CHÍ MỚI: LOẠI BỎ TOÀN BỘ POPUP ĐĂNG NHẬP VÀ MẬT KHẨU
+    # ==========================================================
+    def test_29_no_login_popups_or_password_fields_in_html(self):
+        """Kiểm thử: Toàn bộ popup đăng nhập, mật khẩu và setup token đã bị loại bỏ khỏi HTML"""
+        for file_path in ["templates/index.html", "public/index.html"]:
+            if not os.path.exists(file_path):
+                continue
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            self.assertNotIn("modalAdminLogin", content, f"Không được chứa popup đăng nhập trong {file_path}")
+            self.assertNotIn("modalAdminSetup", content, f"Không được chứa popup setup token trong {file_path}")
+            self.assertNotIn("modalChangePassword", content, f"Không được chứa popup đổi mật khẩu trong {file_path}")
+            self.assertNotIn('id="inputAdminPassword"', content, f"Không được chứa ô nhập mật khẩu trong {file_path}")
+            self.assertNotIn('id="inputSetupToken"', content, f"Không được chứa ô nhập token setup trong {file_path}")
+            self.assertNotIn("Đăng Nhập Chủ Sở Hữu (Ms. Trần Thị Thu Trang)", content, f"Không được chứa tiêu đề popup đăng nhập trong {file_path}")
+
+    def test_30_seamless_owner_access_via_private_site_proxy(self):
+        """Kiểm thử: Truy cập qua Netlify Private Site Proxy tự động mở khóa hệ thống mà không cần mật khẩu"""
+        fresh_client = app.test_client()
+
+        # Giả lập truy cập qua Netlify Proxy của website riêng tư
+        res = fresh_client.get("/api/auth/status", headers={"X-From": "Netlify-Proxy"})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["is_admin"], "Phải tự động cấp quyền chủ sở hữu qua Netlify Proxy")
+        self.assertEqual(data["auth_mode"], "private_site")
+
+        # Kiểm tra API chỉnh sửa /api/process không bị chặn bởi mã 401 Unauthorized
+        res_proc = fresh_client.post("/api/process", headers={"X-From": "Netlify-Proxy"})
+        self.assertNotEqual(res_proc.status_code, 401, "Chủ sở hữu qua Private Site không bị 401 Unauthorized")
+
+    def test_31_anonymous_request_strictly_denied_without_website_auth(self):
+        """Kiểm thử: Người dùng ẩn danh không qua private site bị từ chối 401, không lộ tài liệu gốc"""
+        fresh_client = app.test_client()
+
+        # 1. Trạng thái ẩn danh
+        res = fresh_client.get("/api/auth/status")
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(res.get_json()["is_admin"], "Khách ẩn danh không được cấp quyền admin")
+
+        # 2. Không thể truy cập API xử lý watermark
+        res_proc = fresh_client.post("/api/process")
+        self.assertEqual(res_proc.status_code, 401, "Khách ẩn danh phải bị 401 khi gọi /api/process")
+
+        # 3. Không thể tải file gốc
+        res_down = fresh_client.get("/api/download-original/nonexistent-session")
+        self.assertEqual(res_down.status_code, 401, "Khách ẩn danh phải bị 401 khi tải file gốc")
+
+    def test_32_unconfigured_production_security_locks_system(self):
+        """Kiểm thử: Nếu chạy production mà chưa cấu hình bảo mật website -> Khóa an toàn 403"""
+        old_render = os.environ.get("RENDER")
+        old_basic = os.environ.get("BASIC_AUTH_PASSWORD")
+        old_secret = os.environ.get("PRIVATE_SITE_SECRET")
+        old_token = os.environ.get("ADMIN_SETUP_TOKEN")
+        old_owner = os.environ.get("OWNER_KEY")
+
+        try:
+            os.environ["RENDER"] = "true"
+            for k in ["BASIC_AUTH_USERNAME", "BASIC_AUTH_PASSWORD", "PRIVATE_SITE_SECRET", "ADMIN_SETUP_TOKEN", "OWNER_KEY"]:
+                os.environ.pop(k, None)
+
+            # Tạm đổi auth_file để giả lập chưa cấu hình
+            with patch.object(AdminAuthManager, "is_security_configured", return_value=False):
+                fresh_client = app.test_client()
+                res = fresh_client.get("/api/auth/status")
+                data = res.get_json()
+                self.assertFalse(data["is_configured"], "Phải báo chưa cấu hình bảo mật")
+                self.assertFalse(data["is_admin"])
+                self.assertEqual(data["auth_mode"], "unconfigured")
+
+                # API được bảo vệ trả về 403 Khóa an toàn
+                res_proc = fresh_client.post("/api/process")
+                self.assertEqual(res_proc.status_code, 403, "Chưa cấu hình bảo mật phải trả về 403 Khóa an toàn")
+        finally:
+            if old_render is not None:
+                os.environ["RENDER"] = old_render
+            else:
+                os.environ.pop("RENDER", None)
+            if old_basic is not None:
+                os.environ["BASIC_AUTH_PASSWORD"] = old_basic
+            if old_secret is not None:
+                os.environ["PRIVATE_SITE_SECRET"] = old_secret
+            if old_token is not None:
+                os.environ["ADMIN_SETUP_TOKEN"] = old_token
+            if old_owner is not None:
+                os.environ["OWNER_KEY"] = old_owner
 
 if __name__ == "__main__":
     unittest.main()

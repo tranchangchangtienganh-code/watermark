@@ -19,22 +19,41 @@ from config import ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
 
 def admin_required(fn):
     """
-    Decorator kiểm tra quyền Quản trị viên từ Flask Session hoặc Authorization Header:
+    Decorator kiểm tra quyền Quản trị viên từ Flask Session, Website-level Auth hoặc Authorization Header:
     - Cho phép nếu phiên session đang có quyền quản trị và tự động gia hạn phiên (Sliding Renewal)
+    - Cho phép nếu yêu cầu đã được xác thực bảo mật tại tầng Website / Private Proxy
     - Cho phép qua header Authorization (Bearer token hoặc X-Owner-Key) cho API
     - TUYỆT ĐỐI KHÔNG chấp nhận khóa bí mật trên URL query parameters (?key=...) để bảo mật
-    - Tuyệt đối từ chối (HTTP 401) mọi yêu cầu công khai chưa xác thực
+    - Tuyệt đối từ chối (HTTP 401/403) mọi yêu cầu công khai chưa xác thực
     """
     @wraps(fn)
     def decorated_view(*args, **kwargs):
+        from core.admin_auth import AdminAuthManager
+
+        # 0. Nếu hệ thống chưa cấu hình bảo mật trên production -> Khóa chặt an toàn
+        if not AdminAuthManager.is_security_configured():
+            return jsonify({
+                "success": False,
+                "node": "middleware-security",
+                "error": "Hệ thống đang khóa an toàn do chưa cấu hình bảo mật website riêng tư. Vui lòng thiết lập biến môi trường trên Render/Netlify.",
+                "requires_auth": True,
+                "unconfigured": True
+            }), 403
+
         # 1. Kiểm tra session hiện tại (HttpOnly Cookie)
         if session.get("is_admin"):
             session.permanent = True
             session.modified = True  # Kích hoạt gia hạn trượt an toàn (Sliding Renewal)
             return fn(*args, **kwargs)
 
-        # 2. Hỗ trợ xác thực API qua HTTP Header (Chỉ dùng Header, KHÔNG dùng URL)
-        from core.admin_auth import AdminAuthManager
+        # 2. Hỗ trợ xác thực danh tính tại tầng Website / Private Proxy
+        if AdminAuthManager.verify_private_site_request(request):
+            session["is_admin"] = True
+            session.permanent = True
+            session.modified = True
+            return fn(*args, **kwargs)
+
+        # 3. Hỗ trợ xác thực API qua HTTP Header (Chỉ dùng Header, KHÔNG dùng URL)
         auth_header = request.headers.get("Authorization", "")
         bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
         header_key = request.headers.get("X-Owner-Key") or bearer_key
@@ -47,7 +66,7 @@ def admin_required(fn):
         return jsonify({
             "success": False,
             "node": "middleware-security",
-            "error": "Yêu cầu quyền Quản trị viên để thực hiện thao tác này. Vui lòng đăng nhập.",
+            "error": "Yêu cầu quyền Quản trị viên để thực hiện thao tác này. Vui lòng truy cập qua website riêng tư đã xác thực.",
             "requires_auth": True
         }), 401
     return decorated_view

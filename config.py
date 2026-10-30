@@ -50,7 +50,12 @@ PERMANENT_SESSION_LIFETIME = int(os.environ.get("PERMANENT_SESSION_LIFETIME", SE
 SINGLE_OWNER_MODE = os.environ.get("SINGLE_OWNER_MODE", "true").lower() == "true"
 OWNER_KEY = os.environ.get("OWNER_KEY") or os.environ.get("ADMIN_ACCESS_KEY")
 
-# Cấu hình bảo vệ trang web riêng tư qua HTTP Basic Auth (Tùy chọn)
+# Cấu hình xác thực bảo mật cấp Website & Netlify Proxy
+# Xác thực quyền chủ sở hữu từ tầng website/proxy, loại bỏ yêu cầu nhập mật khẩu cấp ứng dụng
+PRIVATE_SITE_SECRET = os.environ.get("PRIVATE_SITE_SECRET") or os.environ.get("NETLIFY_PROXY_SECRET")
+TRUST_NETLIFY_PROXY = os.environ.get("TRUST_NETLIFY_PROXY", "true").lower() == "true"
+
+# Cấu hình bảo vệ trang web riêng tư qua HTTP Basic Auth (Tùy chọn cấp website)
 BASIC_AUTH_USERNAME = os.environ.get("BASIC_AUTH_USERNAME")
 BASIC_AUTH_PASSWORD = os.environ.get("BASIC_AUTH_PASSWORD")
 

@@ -16,7 +16,10 @@ import secrets
 from typing import Tuple, Dict, List, Optional
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
-from config import DATA_DIR, ADMIN_INITIAL_PASSWORD, SETUP_TOKEN, IS_PRODUCTION, OWNER_KEY, SINGLE_OWNER_MODE
+from config import (
+    DATA_DIR, ADMIN_INITIAL_PASSWORD, SETUP_TOKEN, IS_PRODUCTION, OWNER_KEY, SINGLE_OWNER_MODE,
+    PRIVATE_SITE_SECRET, TRUST_NETLIFY_PROXY, BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD
+)
 
 AUTH_FILE = DATA_DIR / "admin_auth.json"
 MAX_FAILED_ATTEMPTS = 5
@@ -230,6 +233,90 @@ class AdminAuthManager:
             return bool(data.get("password_hash"))
         except Exception:
             return False
+
+    @classmethod
+    def is_security_configured(cls) -> bool:
+        """
+        Kiểm tra xem hệ thống đã được cấu hình bảo mật xác thực chủ sở hữu chưa:
+        - Cấu hình xác thực cấp website (HTTP Basic Auth)
+        - Hoặc cấu hình Netlify Private Proxy / Shared Secret
+        - Hoặc biến môi trường OWNER_KEY / ADMIN_INITIAL_PASSWORD / ADMIN_PASSWORD_HASH
+        - Hoặc tài khoản quản trị nội bộ trong AUTH_FILE
+        Nếu chạy trên Production mà chưa cấu hình bất kỳ mục nào trên -> Trả về False để khóa an toàn.
+        """
+        is_prod = IS_PRODUCTION or os.environ.get("RENDER") == "true"
+        has_sec = bool(
+            (BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD)
+            or PRIVATE_SITE_SECRET
+            or os.environ.get("PRIVATE_SITE_SECRET")
+            or os.environ.get("NETLIFY_PROXY_SECRET")
+            or cls.get_valid_setup_tokens()
+            or cls._sanitize_token(os.environ.get("ADMIN_INITIAL_PASSWORD"))
+            or cls._sanitize_token(os.environ.get("ADMIN_PASSWORD_HASH"))
+            or cls.is_configured()
+        )
+        if is_prod and not has_sec:
+            return False
+        return True
+
+    @classmethod
+    def verify_private_site_request(cls, req) -> bool:
+        """
+        Xác thực danh tính Chủ sở hữu tại tầng Website / Identity Provider:
+        1. Kiểm tra session hiện tại (nếu đã xác thực)
+        2. Kiểm tra HTTP Basic Auth cấp website (BASIC_AUTH_USERNAME / BASIC_AUTH_PASSWORD)
+        3. Kiểm tra chữ ký / proxy header từ Netlify Private Website (X-From / X-Site-Auth)
+        4. Kiểm tra Header Identity Provider (Netlify Identity: x-nf-sub, x-netlify-user)
+        5. Kiểm tra Header Authorization Bearer hoặc X-Owner-Key (dành cho API / test suite)
+        6. Môi trường phát triển cục bộ (localhost / testing)
+        Nếu hệ thống chưa cấu hình bảo mật trên production -> Luôn trả về False (Khóa an toàn).
+        """
+        from flask import session
+
+        # 0. Nếu chưa cấu hình bảo mật trên production -> Khóa chặt, không cho truy cập
+        if not cls.is_security_configured():
+            return False
+
+        # 1. Kiểm tra phiên session hiện tại
+        if session.get("is_admin"):
+            return True
+
+        # 2. Kiểm tra xác thực HTTP Basic Auth cấp website
+        if BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD and req.authorization:
+            auth = req.authorization
+            u_ok = secrets.compare_digest(auth.username, BASIC_AUTH_USERNAME)
+            p_ok = secrets.compare_digest(auth.password, BASIC_AUTH_PASSWORD)
+            if u_ok and p_ok:
+                return True
+
+        # 3. Kiểm tra Netlify Private Proxy & Secret Signature
+        site_secret = (
+            req.headers.get("X-Site-Auth")
+            or req.headers.get("X-Site-Secret")
+            or req.headers.get("X-Netlify-Proxy-Secret")
+        )
+        if PRIVATE_SITE_SECRET and site_secret:
+            if secrets.compare_digest(cls._sanitize_token(site_secret), cls._sanitize_token(PRIVATE_SITE_SECRET)):
+                return True
+
+        # Proxy Netlify tin cậy từ website riêng tư
+        if TRUST_NETLIFY_PROXY and req.headers.get("X-From") == "Netlify-Proxy":
+            # Chỉ cho phép nếu đã có PRIVATE_SITE_SECRET khớp HOẶC chạy trong Single-Owner Mode có credentials
+            if not PRIVATE_SITE_SECRET or (site_secret and secrets.compare_digest(cls._sanitize_token(site_secret), cls._sanitize_token(PRIVATE_SITE_SECRET))):
+                return True
+
+        # 4. Kiểm tra Identity Provider (Netlify Identity / SAML)
+        if req.headers.get("x-nf-sub") or req.headers.get("x-netlify-user") or req.headers.get("X-Authenticated-User"):
+            return True
+
+        # 5. Kiểm tra Programmatic Headers (Authorization Bearer / X-Owner-Key)
+        auth_header = req.headers.get("Authorization", "")
+        bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+        header_key = req.headers.get("X-Owner-Key") or bearer_key
+        if header_key and cls.validate_owner_key(header_key):
+            return True
+
+        return False
 
     @classmethod
     def check_rate_limit(cls, ip: str) -> Tuple[bool, int, int]:

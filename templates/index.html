@@ -26,27 +26,10 @@
       </button>
 
       <!-- Huy hiệu Trạng thái Quyền Hạn -->
-      <div id="authStatusBadge" class="badge-admin-status badge-guest-active">
-        <span class="status-dot" style="background: #94a3b8;"></span>
-        <span id="authStatusText">Đang kiểm tra quyền...</span>
+      <div id="authStatusBadge" class="badge-admin-status badge-admin-active">
+        <span class="status-dot" style="background: #10b981;"></span>
+        <span id="authStatusText">👑 Chủ Sở Hữu (Ms. Trang) • Đã Xác Thực</span>
       </div>
-
-      <!-- Các nút Hành động Xác thực -->
-      <button type="button" class="btn-header btn-login-gold" id="btnOpenLoginModal" style="display: none;">
-        🔑 Đăng Nhập Quản Trị
-      </button>
-
-      <button type="button" class="btn-header btn-login-gold" id="btnOpenSetupModal" style="display: none;">
-        🚀 Thiết Lập Ban Đầu
-      </button>
-
-      <button type="button" class="btn-secondary" id="btnOpenChangePassModal" style="display: none;">
-        ⚙️ Đổi Mật Khẩu
-      </button>
-
-      <button type="button" class="btn-header btn-admin-logout" id="btnLogout" style="display: none;">
-        🚪 Đăng Xuất
-      </button>
     </div>
   </header>
 
@@ -106,29 +89,26 @@
       <!-- Cột Trái: Trình Chỉnh Sửa Watermark (Chỉ Dành Cho Quản Trị Viên) -->
       <section class="card" id="editorCard">
         
-        <!-- Thông Báo Cho Khách Chưa Đăng Nhập (Read-Only Notice) -->
-        <div class="guest-notice-banner" id="guestNoticeBanner">
-          <div class="guest-notice-icon">🔒</div>
+        <!-- Cảnh báo nếu môi trường sản xuất chưa cấu hình bảo mật -->
+        <div class="guest-notice-banner" id="unconfiguredNoticeBanner" style="display: none; background: #fffbeb; border-color: #fde68a;">
+          <div class="guest-notice-icon" style="color: #d97706;">🔒</div>
           <div class="guest-notice-text">
-            <h4>Chế Độ Xem & Tải Về Công Khai (Read-Only Access)</h4>
-            <p>
-              Chỉ Quản trị viên (Ms. Trang) mới có quyền thêm, sửa, thay đổi vị trí, màu sắc watermark hoặc thay thế ảnh/tệp gốc. Người xem công cộng chỉ được phép xem và tải về bản thành phẩm có watermark vĩnh viễn.
+            <h4 style="color: #92400e;">Yêu Cầu Cấu Hình Bảo Mật Website Riêng Tư</h4>
+            <p id="unconfiguredNoticeText" style="color: #b45309; margin: 0;">
+              Hệ thống đang khóa an toàn để bảo vệ tệp của bạn. Vui lòng thiết lập biến môi trường bảo mật trên Render Dashboard hoặc bật mật khẩu Netlify Visitor Access để tự động mở khóa quyền chủ sở hữu.
             </p>
-            <button type="button" class="btn-primary" id="btnBannerLogin" style="width: auto; padding: 8px 18px; font-size: 13px;">
-              🔑 Đăng Nhập Quản Trị Viên Để Mở Khóa Chỉnh Sửa
-            </button>
           </div>
         </div>
 
         <!-- Tiêu đề Trình Biên Tập -->
         <h2 class="card-title">
-          <span>🛠️</span> <span id="editorCardTitle">Cấu Hình Watermark & Tải Lên Tệp</span>
+          <span>🛠️</span> <span id="editorCardTitle">Cấu Hình Watermark & Tải Lên Tệp (Ms. Trần Thị Thu Trang)</span>
         </h2>
         <p class="card-subtitle" id="editorCardSubtitle">
-          Watermark được hòa trộn trực tiếp vào pixel hình ảnh hoặc dòng nội dung trang PDF, kèm phân quyền bảo vệ.
+          Watermark được hòa trộn trực tiếp vào pixel hình ảnh hoặc dòng nội dung trang PDF, kèm phân quyền bảo vệ độc quyền.
         </p>
 
-        <!-- Form Bao Bọc Biên Tập (Sẽ bị disable khi là khách) -->
+        <!-- Form Bao Bọc Biên Tập (Mở sẵn cho Chủ sở hữu) -->
         <div id="editorContentWrapper">
 
           <!-- Khu vực Kéo thả Tải lên Tệp (client-upload) -->
@@ -348,126 +328,7 @@
     </div>
   </div>
 
-  <!-- Modal Đăng Nhập Quản Trị Viên / Chủ Sở Hữu -->
-  <div class="modal" id="modalAdminLogin">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">
-          👑 Đăng Nhập Chủ Sở Hữu (Ms. Trần Thị Thu Trang)
-        </h3>
-        <button class="modal-close" id="btnCloseLoginModal">✖</button>
-      </div>
-
-      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-        Nhập mật khẩu quản trị để mở khóa toàn bộ quyền chỉnh sửa watermark, thay thế ảnh/tệp gốc và tải về thành phẩm.
-      </p>
-
-      <div class="rate-limit-warning" id="loginRateWarning"></div>
-
-      <form id="formAdminLogin">
-        <div class="form-group">
-          <label class="form-label">Mật Khẩu Quản Trị Viên:</label>
-          <div class="input-with-icon">
-            <input type="password" id="inputAdminPassword" class="form-input" placeholder="Nhập mật khẩu quản trị..." required>
-            <button type="button" class="input-icon-btn" id="btnToggleLoginPass" title="Hiện/Ẩn">👁️</button>
-          </div>
-        </div>
-
-        <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
-          <input type="checkbox" id="chkRememberOwner" checked disabled style="width: 16px; height: 16px; cursor: default;">
-          <label for="chkRememberOwner" style="font-size: 13px; color: #475569;">
-            Duy trì đăng nhập an toàn (Tự động gia hạn phiên)
-          </label>
-        </div>
-
-        <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 8px;">
-          🔒 <em>Phiên đăng nhập được bảo mật bằng HttpOnly, Secure Cookie và tự động gia hạn an toàn khi bạn thao tác. Không lưu trữ mật khẩu trên URL hay bộ nhớ công khai.</em>
-        </p>
-
-        <button type="submit" class="btn-primary" id="btnSubmitLogin" style="margin-top: 12px;">
-          Đăng Nhập & Mở Khóa Quyền
-        </button>
-      </form>
-    </div>
-  </div>
-
-  <!-- Modal Thiết Lập Mật Khẩu Lần Đầu (Initial Setup) -->
-  <div class="modal" id="modalAdminSetup">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">
-          🚀 Thiết Lập Mật Khẩu Quản Trị Viên Lần Đầu
-        </h3>
-        <button class="modal-close" id="btnCloseSetupModal">✖</button>
-      </div>
-
-      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-        Hệ thống chưa có mật khẩu quản trị. Vui lòng thiết lập mật khẩu bảo mật (tối thiểu 6 ký tự). Mật khẩu này được lưu trữ an toàn bằng thuật toán Scrypt và không thể khôi phục nếu quên.
-      </p>
-
-      <form id="formAdminSetup">
-        <div class="form-group" id="setupTokenGroup" style="display: none;">
-          <label class="form-label">Mã Kích Hoạt Thiết Lập (Setup Token):</label>
-          <div style="position: relative;">
-            <input type="password" id="inputSetupToken" class="form-input" placeholder="Nhập mã Setup Token (từ ADMIN_SETUP_TOKEN trên Render)..." style="padding-right: 40px;">
-            <button type="button" id="btnToggleSetupToken" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-muted);" title="Ẩn/Hiện token">👁️</button>
-          </div>
-          <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
-            🔒 <em>Mã bảo mật chống chiếm đoạt quyền quản trị (khớp với biến ADMIN_SETUP_TOKEN hoặc SETUP_TOKEN trên Render).</em>
-          </p>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Mật Khẩu Mới:</label>
-          <input type="password" id="inputSetupPassword" class="form-input" placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)..." required minlength="6">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Xác Nhận Mật Khẩu:</label>
-          <input type="password" id="inputSetupConfirm" class="form-input" placeholder="Nhập lại mật khẩu..." required minlength="6">
-        </div>
-
-        <button type="submit" class="btn-primary" id="btnSubmitSetup" style="margin-top: 10px;">
-          Lưu & Khởi Tạo Quản Trị Viên
-        </button>
-      </form>
-    </div>
-  </div>
-
-  <!-- Modal Đổi Mật Khẩu Quản Trị Viên -->
-  <div class="modal" id="modalChangePassword">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">
-          ⚙️ Đổi Mật Khẩu Quản Trị Viên
-        </h3>
-        <button class="modal-close" id="btnCloseChangePassModal">✖</button>
-      </div>
-
-      <form id="formChangePassword">
-        <div class="form-group">
-          <label class="form-label">Mật Khẩu Hiện Tại:</label>
-          <input type="password" id="inputCurrentPass" class="form-input" placeholder="Nhập mật khẩu hiện tại..." required>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Mật Khẩu Mới:</label>
-          <input type="password" id="inputNewPass" class="form-input" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)..." required minlength="6">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Xác Nhận Mật Khẩu Mới:</label>
-          <input type="password" id="inputConfirmNewPass" class="form-input" placeholder="Nhập lại mật khẩu mới..." required minlength="6">
-        </div>
-
-        <button type="submit" class="btn-primary" id="btnSubmitChangePass" style="margin-top: 10px;">
-          Cập Nhật Mật Khẩu
-        </button>
-      </form>
-    </div>
-  </div>
-
-  <!-- Modal Kiểm Tra Tính Toàn Vẹn Tệp -->
+  <!-- Modal Kiểm Tra Tính Toàn Vẹn Tệp (Công khai đối chiếu SHA-256) -->
   <div class="modal" id="modalIntegrity">
     <div class="modal-content">
       <div class="modal-header">
