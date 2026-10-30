@@ -1,0 +1,69 @@
+# ==========================================
+# Security, Passwords & Credentials
+# ==========================================
+data/admin_auth.json
+data/.secret_key
+data/sessions/
+data/sessions/*
+data/*
+!data/.gitkeep
+*.env
+.env*
+*.key
+*.pem
+*.secret
+*.token
+*.credential*
+
+# ==========================================
+# User Uploads, Originals & Generated Files
+# ==========================================
+sessions/
+uploads/
+temp/
+tmp/
+*.orig
+*.original.*
+
+# ==========================================
+# Python & Bytecode
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ==========================================
+# Virtual Environments
+# ==========================================
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================================
+# Agent & IDE Configurations
+# ==========================================
+.agent/
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# Operating System Files & Logs
+# ==========================================
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
