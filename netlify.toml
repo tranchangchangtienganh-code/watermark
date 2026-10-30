@@ -1,0 +1,43 @@
+# Netlify Configuration for Watermark System (Ms. Trần Thị Thu Trang)
+# Frontend deployed on Netlify, Backend on Render (https://watermark-nuwt.onrender.com)
+
+[build]
+  publish = "public"
+  command = "python build_frontend.py"
+
+# Same-Origin API Proxy Rules
+# Forwards all /api/* calls seamlessly over HTTPS to Flask on Render
+[[redirects]]
+  from = "/api/*"
+  to = "https://watermark-nuwt.onrender.com/api/:splat"
+  status = 200
+  force = true
+  headers = {X-From = "Netlify-Proxy"}
+
+# Fallback for client-side routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Security Headers (OWASP recommended)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# Asset Cache Control (immutable assets)
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# HTML Cache Control (never cache stale HTML)
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

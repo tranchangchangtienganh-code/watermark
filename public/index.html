@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="">
+  <title>Hệ Thống Đóng Watermark & Bảo Vệ Bản Quyền | Ms. Trần Thị Thu Trang</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔒</text></svg>">
+</head>
+<body>
+
+  <!-- Thanh Điều Hướng Trên Cùng -->
+  <header class="navbar">
+    <div class="brand">
+      <div class="brand-icon">🔒</div>
+      <div class="brand-text">
+        <h1>HỆ THỐNG ĐÓNG WATERMARK & BẢO VỆ TỆP</h1>
+        <p>Bản Quyền Độc Quyền • Ms. Trần Thị Thu Trang</p>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <!-- Nút Kiểm Tra Tính Toàn Vẹn -->
+      <button type="button" class="btn-secondary" id="btnOpenIntegrityModal">
+        🔍 Kiểm Tra Tính Toàn Vẹn
+      </button>
+
+      <!-- Huy hiệu Trạng thái Quyền Hạn -->
+      <div id="authStatusBadge" class="badge-admin-status badge-guest-active">
+        <span class="status-dot" style="background: #94a3b8;"></span>
+        <span id="authStatusText">Đang kiểm tra quyền...</span>
+      </div>
+
+      <!-- Các nút Hành động Xác thực -->
+      <button type="button" class="btn-header btn-login-gold" id="btnOpenLoginModal" style="display: none;">
+        🔑 Đăng Nhập Quản Trị
+      </button>
+
+      <button type="button" class="btn-header btn-login-gold" id="btnOpenSetupModal" style="display: none;">
+        🚀 Thiết Lập Ban Đầu
+      </button>
+
+      <button type="button" class="btn-secondary" id="btnOpenChangePassModal" style="display: none;">
+        ⚙️ Đổi Mật Khẩu
+      </button>
+
+      <button type="button" class="btn-header btn-admin-logout" id="btnLogout" style="display: none;">
+        🚪 Đăng Xuất
+      </button>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Khối Biểu Đồ Kiến Trúc Hệ Thống (4 Khối Theo Đặc Tả) -->
+    <section class="architecture-card">
+      <div class="arch-header">
+        <div class="arch-title">
+          <span>⚡</span> Kiến Trúc Quy Trình Bảo Mật & Xác Thực Khép Kín (System Pipeline)
+        </div>
+        <span id="pipelineRoleNote" style="font-size: 12px; color: var(--text-muted);">
+          Đang xác định phân quyền truy cập...
+        </span>
+      </div>
+
+      <div class="pipeline-flow">
+        <!-- Node 1: client-upload -->
+        <div class="pipeline-node" id="node-client">
+          <div class="node-icon">🖥️</div>
+          <div class="node-name">client-upload</div>
+          <div class="node-desc">Giao diện Tải lên & Xem trước</div>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <!-- Node 2: middleware-security -->
+        <div class="pipeline-node" id="node-security">
+          <div class="node-icon">🛡️</div>
+          <div class="node-name">middleware-security</div>
+          <div class="node-desc">Xác thực Admin & Lọc Magic Bytes</div>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <!-- Node 3: controller-watermark -->
+        <div class="pipeline-node" id="node-watermark">
+          <div class="node-icon">⚙️</div>
+          <div class="node-name">controller-watermark</div>
+          <div class="node-desc">Hòa trộn Pixel & Khóa File</div>
+        </div>
+
+        <div class="flow-arrow">➔</div>
+
+        <!-- Node 4: database-storage -->
+        <div class="pipeline-node" id="node-storage">
+          <div class="node-icon">💾</div>
+          <div class="node-name">database-storage</div>
+          <div class="node-desc">Kho Lưu trữ Tạm thời (Session)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Khung Làm Việc Chính (2 Cột) -->
+    <div class="main-grid">
+
+      <!-- Cột Trái: Trình Chỉnh Sửa Watermark (Chỉ Dành Cho Quản Trị Viên) -->
+      <section class="card" id="editorCard">
+        
+        <!-- Thông Báo Cho Khách Chưa Đăng Nhập (Read-Only Notice) -->
+        <div class="guest-notice-banner" id="guestNoticeBanner">
+          <div class="guest-notice-icon">🔒</div>
+          <div class="guest-notice-text">
+            <h4>Chế Độ Xem & Tải Về Công Khai (Read-Only Access)</h4>
+            <p>
+              Chỉ Quản trị viên (Ms. Trang) mới có quyền thêm, sửa, thay đổi vị trí, màu sắc watermark hoặc thay thế ảnh/tệp gốc. Người xem công cộng chỉ được phép xem và tải về bản thành phẩm có watermark vĩnh viễn.
+            </p>
+            <button type="button" class="btn-primary" id="btnBannerLogin" style="width: auto; padding: 8px 18px; font-size: 13px;">
+              🔑 Đăng Nhập Quản Trị Viên Để Mở Khóa Chỉnh Sửa
+            </button>
+          </div>
+        </div>
+
+        <!-- Tiêu đề Trình Biên Tập -->
+        <h2 class="card-title">
+          <span>🛠️</span> <span id="editorCardTitle">Cấu Hình Watermark & Tải Lên Tệp</span>
+        </h2>
+        <p class="card-subtitle" id="editorCardSubtitle">
+          Watermark được hòa trộn trực tiếp vào pixel hình ảnh hoặc dòng nội dung trang PDF, kèm phân quyền bảo vệ.
+        </p>
+
+        <!-- Form Bao Bọc Biên Tập (Sẽ bị disable khi là khách) -->
+        <div id="editorContentWrapper">
+
+          <!-- Khu vực Kéo thả Tải lên Tệp (client-upload) -->
+          <div class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp" style="display: none;">
+            <div class="dropzone-icon">📁</div>
+            <div class="dropzone-text">
+              <h3>Kéo & thả tệp vào đây, hoặc nhấp để chọn</h3>
+              <p>Hỗ trợ đầy đủ Word (.docx), PDF (.pdf) và Hình ảnh (.png, .jpg, .webp)</p>
+            </div>
+            <div class="format-badges">
+              <span class="badge badge-pdf">PDF Document (.pdf)</span>
+              <span class="badge badge-docx">Word Document (.docx)</span>
+              <span class="badge badge-img">Hình Ảnh (.png, .jpg, .webp)</span>
+            </div>
+          </div>
+
+          <!-- Thông tin tệp đã chọn -->
+          <div class="file-info-box" id="fileInfoBox">
+            <div class="file-info-left">
+              <div class="file-type-icon" id="fileIcon">📄</div>
+              <div class="file-details">
+                <h4 id="fileName">tailieu.pdf</h4>
+                <span id="fileSize">2.4 MB • PDF</span>
+              </div>
+            </div>
+            <button type="button" class="btn-remove-file" id="btnRemoveFile" title="Xóa tệp đã chọn">✖</button>
+          </div>
+
+          <!-- Form Cấu hình Watermark & Khóa Bảo Mật -->
+          <form id="formConfig" style="margin-top: 24px;">
+
+            <!-- Nội dung Watermark -->
+            <div class="form-group">
+              <label class="form-label">Tên / Chữ Watermark Bản Quyền:</label>
+              <input type="text" id="inputWatermarkText" name="watermark_text" class="form-input" value="TRẦN THỊ THU TRANG" required>
+            </div>
+
+            <!-- Ghi chú phụ kèm theo -->
+            <div class="form-group">
+              <label class="form-label">Thông Điệp Bản Quyền Kèm Theo:</label>
+              <input type="text" id="inputSubText" name="sub_text" class="form-input" value="BẢN QUYỀN SỞ HỮU • NGHIÊM CẤM SAO CHÉP & CHỈNH SỬA">
+            </div>
+
+            <!-- Vị trí Watermark -->
+            <div class="form-group">
+              <label class="form-label">Vị Trí Đóng Dấu:</label>
+              <select id="selectPosition" name="position" class="form-input">
+                <option value="bottom-center" selected>Ở cuối trang / Chân tệp (Mặc định)</option>
+                <option value="bottom-right">Góc dưới bên phải</option>
+                <option value="bottom-left">Góc dưới bên trái</option>
+              </select>
+            </div>
+
+            <!-- Tone Màu Xám Thanh Lịch -->
+            <div class="form-group">
+              <label class="form-label">Tông Màu Xám Thanh Lịch (Gray Palette):</label>
+              <div class="color-presets">
+                <div class="color-option selected" data-color="#708090" style="background-color: #708090;" title="Slate Gray (Khuyên Dùng)"></div>
+                <div class="color-option" data-color="#888888" style="background-color: #888888;" title="Cool Gray"></div>
+                <div class="color-option" data-color="#475569" style="background-color: #475569;" title="Deep Charcoal"></div>
+                <div class="color-option" data-color="#555555" style="background-color: #555555;" title="Dark Silver"></div>
+                <input type="color" id="customColorInput" value="#708090" style="width: 34px; height: 32px; border: none; cursor: pointer; border-radius: 4px;">
+              </div>
+            </div>
+
+            <!-- Mật Khẩu Khóa Quyền Mở/Sửa Tệp -->
+            <div class="form-group">
+              <label class="form-label">Mật Khẩu Khóa Phân Quyền Cho Tệp Xuất Bản (Tùy Chọn):</label>
+              <div class="input-with-icon">
+                <input type="password" id="passwordInput" name="password" class="form-input" placeholder="Mật khẩu khóa phân quyền mở file (hoặc để trống để dùng khóa chuẩn)">
+                <button type="button" class="input-icon-btn" id="btnTogglePassword" title="Hiện/Ẩn mật khẩu">👁️</button>
+              </div>
+              <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 5px;">
+                💡 <em>Dùng để khóa phân quyền PDF/Word. Người nhận chỉ có thể xem tài liệu ở chế độ Chỉ Đọc.</em>
+              </p>
+            </div>
+
+            <!-- Danh Sách Chính Sách Bảo Vệ -->
+            <div class="form-group">
+              <label class="form-label">Chính Sách Chống Chỉnh Sửa & Chuyển Đổi:</label>
+              <div class="policy-list">
+                <label class="policy-item">
+                  <input type="checkbox" name="disallow_modify" value="true" checked>
+                  <div class="policy-content">
+                    <span class="policy-title">Khóa quyền chỉnh sửa (Read-Only Mode)</span>
+                    <span class="policy-desc">Thiết lập cấm sửa đổi cấu trúc trang và bảo vệ nội dung văn bản</span>
+                  </div>
+                </label>
+
+                <label class="policy-item">
+                  <input type="checkbox" name="disallow_copy" value="true" checked>
+                  <div class="policy-content">
+                    <span class="policy-title">Chống sao chép văn bản & trích xuất hình ảnh (Disable Copy)</span>
+                    <span class="policy-desc">Ngăn chặn bôi đen copy đoạn văn và trích xuất hình ảnh trái phép</span>
+                  </div>
+                </label>
+
+                <label class="policy-item">
+                  <input type="checkbox" name="anti_convert" value="true" checked disabled>
+                  <div class="policy-content">
+                    <span class="policy-title">Hòa trộn trực tiếp vào pixel/nội dung trang (Permanent Burn)</span>
+                    <span class="policy-desc">Watermark được vẽ vĩnh viễn vào pixel hoặc dòng lệnh vẽ trang PDF</span>
+                  </div>
+                </label>
+
+                <label class="policy-item">
+                  <input type="checkbox" name="require_password_to_open" value="true">
+                  <div class="policy-content">
+                    <span class="policy-title">Yêu cầu nhập mật khẩu để mở tệp</span>
+                    <span class="policy-desc">Mặc định tắt: Cho phép xem tự do nhưng bảo lưu quyền tác giả</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Nút Thực Thi Chính -->
+            <button type="submit" class="btn-primary" id="btnSubmit" disabled>
+              <span>🔒</span> ĐÓNG WATERMARK VĨNH VIỄN & XUẤT BẢN
+            </button>
+          </form>
+
+        </div>
+      </section>
+
+      <!-- Cột Phải: Xem Trước Thành Phẩm & Tải Về Công Khai -->
+      <section class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <h2 class="card-title" style="margin-bottom: 0;">
+            <span>👁️</span> Xem Trước & Tải Về
+          </h2>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn-secondary" id="btnDownloadOriginal" style="display: none; background: #475569; color: white; border: none; font-size: 12px;" title="Chỉ Quản trị viên mới được phép tải tệp gốc">
+              📦 Tải Tệp Gốc (Admin)
+            </button>
+            <button type="button" class="btn-secondary" id="btnDownload" style="display: none; background: #16a34a; color: white; border: none;">
+              <span>⬇️</span> TẢI VỀ TỆP ĐÃ BẢO VỆ
+            </button>
+          </div>
+        </div>
+        <p class="card-subtitle">
+          Bản thành phẩm được hiển thị công khai cho mọi người xem và tải về (đã hòa trộn watermark vĩnh viễn).
+        </p>
+
+        <!-- Khung xem trước hình ảnh / trang tài liệu -->
+        <div class="preview-container" id="previewContainer">
+          <div class="preview-empty" id="previewEmpty">
+            <div class="preview-empty-icon">📑</div>
+            <h4>Chưa có bản xem trước</h4>
+            <p>Vui lòng chọn hoặc xử lý một tệp để hiển thị bản xem trước tại đây.</p>
+          </div>
+          <img id="previewImage" class="preview-image" style="display: none;" alt="Xem trước tài liệu đã đóng watermark">
+        </div>
+
+        <!-- Chứng Thư Bảo Mật & Toàn Vẹn Tệp (Certificate Card) -->
+        <div class="certificate-card" id="certificateCard">
+          <div class="cert-header">
+            <div class="cert-title">
+              <span>🛡️</span> CHỨNG THỰC BẢN QUYỀN TOÀN VẸN
+            </div>
+            <span style="font-size: 11px; background: #bbf7d0; color: #15803d; padding: 2px 8px; border-radius: 999px; font-weight: 700;">
+              VERIFIED
+            </span>
+          </div>
+
+          <div class="cert-item">
+            <span class="cert-label">Tên tệp xuất bản:</span>
+            <span class="cert-val" id="certOriginalName">-</span>
+          </div>
+
+          <div class="cert-item">
+            <span class="cert-label">Dung lượng trước / sau:</span>
+            <span class="cert-val"><span id="certOriginalSize">-</span> ➔ <span id="certProtectedSize">-</span></span>
+          </div>
+
+          <div class="cert-item">
+            <span class="cert-label">Mã SHA-256 gốc:</span>
+            <span class="cert-val" id="certOriginalSha">-</span>
+          </div>
+
+          <div class="cert-item">
+            <span class="cert-label">Mã SHA-256 sau khi khóa:</span>
+            <span class="cert-val" id="certProtectedSha" style="color: #15803d; font-weight: bold;">-</span>
+          </div>
+
+          <div class="cert-item">
+            <span class="cert-label">Cơ chế nhúng watermark:</span>
+            <span class="cert-val" style="color: #1e40af; font-weight: 600;">Hòa trộn trực tiếp vào pixel / nội dung trang</span>
+          </div>
+
+          <div class="cert-item">
+            <span class="cert-label">Trạng thái khóa:</span>
+            <span class="cert-val" id="certLockStatus">-</span>
+          </div>
+        </div>
+
+        <!-- Thư Viện Các Tệp Đã Hoàn Thành (Gallery Dành Cho Khách) -->
+        <div class="gallery-section" id="gallerySection" style="display: none;">
+          <div class="gallery-title">
+            <span>📚</span> Các Tệp Đã Đóng Watermark Gần Đây:
+          </div>
+          <div class="gallery-grid" id="galleryGrid">
+            <!-- Render động các tệp -->
+          </div>
+        </div>
+
+      </section>
+    </div>
+  </main>
+
+  <!-- Loading Overlay với thông tin chi tiết từng Node -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <div class="loading-step" id="loadingStepText">Đang khởi động tiến trình...</div>
+      <div class="loading-detail" id="loadingDetailText">Đang chuyển tiếp dữ liệu qua các khối bảo mật...</div>
+    </div>
+  </div>
+
+  <!-- Modal Đăng Nhập Quản Trị Viên -->
+  <div class="modal" id="modalAdminLogin">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">
+          🔑 Đăng Nhập Quản Trị Viên (Ms. Trang)
+        </h3>
+        <button class="modal-close" id="btnCloseLoginModal">✖</button>
+      </div>
+
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+        Nhập mật khẩu quản trị viên để mở khóa toàn bộ quyền chỉnh sửa watermark, tải lên tệp mới và cấu hình khóa.
+      </p>
+
+      <div class="rate-limit-warning" id="loginRateWarning"></div>
+
+      <form id="formAdminLogin">
+        <div class="form-group">
+          <label class="form-label">Mật Khẩu Quản Trị Viên:</label>
+          <div class="input-with-icon">
+            <input type="password" id="inputAdminPassword" class="form-input" placeholder="Nhập mật khẩu quản trị viên..." required>
+            <button type="button" class="input-icon-btn" id="btnToggleLoginPass" title="Hiện/Ẩn">👁️</button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" id="btnSubmitLogin" style="margin-top: 10px;">
+          Đăng Nhập
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Thiết Lập Mật Khẩu Lần Đầu (Initial Setup) -->
+  <div class="modal" id="modalAdminSetup">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">
+          🚀 Thiết Lập Mật Khẩu Quản Trị Viên Lần Đầu
+        </h3>
+        <button class="modal-close" id="btnCloseSetupModal">✖</button>
+      </div>
+
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+        Hệ thống chưa có mật khẩu quản trị. Vui lòng thiết lập mật khẩu bảo mật (tối thiểu 6 ký tự). Mật khẩu này được lưu trữ an toàn bằng thuật toán Scrypt và không thể khôi phục nếu quên.
+      </p>
+
+      <form id="formAdminSetup">
+        <div class="form-group" id="setupTokenGroup" style="display: none;">
+          <label class="form-label">Mã Kích Hoạt Thiết Lập (Setup Token):</label>
+          <div style="position: relative;">
+            <input type="password" id="inputSetupToken" class="form-input" placeholder="Nhập mã Setup Token (từ ADMIN_SETUP_TOKEN trên Render)..." style="padding-right: 40px;">
+            <button type="button" id="btnToggleSetupToken" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-muted);" title="Ẩn/Hiện token">👁️</button>
+          </div>
+          <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
+            🔒 <em>Mã bảo mật chống chiếm đoạt quyền quản trị (khớp với biến ADMIN_SETUP_TOKEN hoặc SETUP_TOKEN trên Render).</em>
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Mật Khẩu Mới:</label>
+          <input type="password" id="inputSetupPassword" class="form-input" placeholder="Nhập mật khẩu (tối thiểu 6 ký tự)..." required minlength="6">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Xác Nhận Mật Khẩu:</label>
+          <input type="password" id="inputSetupConfirm" class="form-input" placeholder="Nhập lại mật khẩu..." required minlength="6">
+        </div>
+
+        <button type="submit" class="btn-primary" id="btnSubmitSetup" style="margin-top: 10px;">
+          Lưu & Khởi Tạo Quản Trị Viên
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Đổi Mật Khẩu Quản Trị Viên -->
+  <div class="modal" id="modalChangePassword">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">
+          ⚙️ Đổi Mật Khẩu Quản Trị Viên
+        </h3>
+        <button class="modal-close" id="btnCloseChangePassModal">✖</button>
+      </div>
+
+      <form id="formChangePassword">
+        <div class="form-group">
+          <label class="form-label">Mật Khẩu Hiện Tại:</label>
+          <input type="password" id="inputCurrentPass" class="form-input" placeholder="Nhập mật khẩu hiện tại..." required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Mật Khẩu Mới:</label>
+          <input type="password" id="inputNewPass" class="form-input" placeholder="Nhập mật khẩu mới (tối thiểu 6 ký tự)..." required minlength="6">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Xác Nhận Mật Khẩu Mới:</label>
+          <input type="password" id="inputConfirmNewPass" class="form-input" placeholder="Nhập lại mật khẩu mới..." required minlength="6">
+        </div>
+
+        <button type="submit" class="btn-primary" id="btnSubmitChangePass" style="margin-top: 10px;">
+          Cập Nhật Mật Khẩu
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Kiểm Tra Tính Toàn Vẹn Tệp -->
+  <div class="modal" id="modalIntegrity">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-size: 16px; font-weight: 700; color: #1e293b;">
+          🔍 Kiểm Tra Tính Toàn Vẹn & Chống Giả Mạo
+        </h3>
+        <button class="modal-close" id="btnCloseIntegrityModal">✖</button>
+      </div>
+
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+        Dán mã SHA-256 đối chiếu hoặc tải tệp cần kiểm chứng vào để xác thực tệp có bị sửa đổi hay không.
+      </p>
+
+      <div class="form-group">
+        <label class="form-label">Mã SHA-256 đối chiếu (Expected Hash):</label>
+        <input type="text" id="expectedHashInput" class="form-input" placeholder="Dán mã SHA-256 từ chứng thư vào đây...">
+      </div>
+
+      <div class="dropzone" id="verifyDropzone" style="padding: 24px 16px;">
+        <input type="file" id="verifyFileInput" style="display: none;">
+        <div style="font-size: 32px; margin-bottom: 8px;">📂</div>
+        <div style="font-size: 13.5px; font-weight: 600;">Chọn hoặc thả tệp cần kiểm tra vào đây</div>
+      </div>
+
+      <div id="verifyResultBox" style="display: none; margin-top: 16px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px; border-radius: 8px;">
+        <div style="font-size: 12.5px; margin-bottom: 6px;">
+          <strong>SHA-256 thực tế:</strong>
+          <div id="verifyActualHash" style="font-family: monospace; font-size: 11px; word-break: break-all; color: #334155; margin-top: 2px;"></div>
+        </div>
+        <div id="verifyMatchStatus" style="font-size: 13px; margin-top: 8px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Thông Báo -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Script Khởi Chạy -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

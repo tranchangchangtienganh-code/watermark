@@ -84,6 +84,29 @@ def csrf_protect():
                 "csrf_invalid": True
             }), 403
 
+@app.after_request
+def add_cors_and_security_headers(response):
+    """Bổ sung CORS headers cho Netlify proxy và bảo vệ an toàn"""
+    origin = request.headers.get("Origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Authorization, X-Requested-With"
+        response.headers["Vary"] = "Origin, Cookie"
+    return response
+
+@app.route("/api/<path:subpath>", methods=["OPTIONS"])
+def handle_options(subpath):
+    """Xử lý CORS preflight OPTIONS request từ frontend Netlify"""
+    response = jsonify({"success": True})
+    origin = request.headers.get("Origin", "*")
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Authorization, X-Requested-With"
+    return response, 200
+
 @app.context_processor
 def inject_csrf_token():
     """Tự động cung cấp csrf_token cho giao diện HTML"""
@@ -115,13 +138,26 @@ def index():
 # ==========================================================
 @app.route("/api/auth/status")
 def auth_status():
-    """Trả về trạng thái cấu hình và phiên đăng nhập hiện tại"""
+    """Trả về trạng thái cấu hình và phiên đăng nhập hiện tại kèm CSRF token đồng bộ cho Netlify/SPA"""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
     return jsonify({
         "success": True,
         "is_configured": AdminAuthManager.is_configured(),
         "is_admin": session.get("is_admin", False),
         "setup_token_required": AdminAuthManager.is_setup_token_required(),
-        "setup_locked": AdminAuthManager.is_setup_locked()
+        "setup_locked": AdminAuthManager.is_setup_locked(),
+        "csrf_token": session.get("csrf_token")
+    })
+
+@app.route("/api/csrf-token")
+def get_csrf_token_endpoint():
+    """Endpoint cấp phát CSRF token đồng bộ cho Frontend Netlify/SPA"""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return jsonify({
+        "success": True,
+        "csrf_token": session.get("csrf_token")
     })
 
 @app.route("/api/auth/setup", methods=["POST"])

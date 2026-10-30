@@ -1,0 +1,3 @@
+# Netlify Same-Origin API Reverse Proxy to Flask on Render
+/api/*  https://watermark-nuwt.onrender.com/api/:splat  200!
+/*      /index.html                      200

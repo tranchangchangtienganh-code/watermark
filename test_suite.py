@@ -688,5 +688,66 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
             else:
                 AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
 
+    # ==========================================================
+    # TIÊU CHÍ NETLIFY FRONTEND & PROXY INTEGRATION
+    # ==========================================================
+    def test_20_csrf_token_endpoint_and_auth_status_sync(self):
+        """Kiểm thử cấp phát và đồng bộ CSRF token cho Frontend Netlify/SPA tĩnh"""
+        with self.client as client:
+            # 1. Gọi /api/auth/status -> Phải trả về csrf_token hợp lệ
+            res_status = client.get("/api/auth/status")
+            self.assertEqual(res_status.status_code, 200)
+            data_status = res_status.get_json()
+            csrf_from_status = data_status.get("csrf_token")
+            self.assertIsNotNone(csrf_from_status, "auth/status phải trả về csrf_token")
+            self.assertEqual(len(csrf_from_status), 64, "CSRF token phải có độ dài 64 hex characters (32 bytes)")
+
+            # 2. Gọi endpoint /api/csrf-token -> Phải khớp với token trong session
+            res_csrf = client.get("/api/csrf-token")
+            self.assertEqual(res_csrf.status_code, 200)
+            data_csrf = res_csrf.get_json()
+            self.assertTrue(data_csrf.get("success"))
+            self.assertEqual(data_csrf.get("csrf_token"), csrf_from_status, "CSRF token phải đồng nhất trong phiên session")
+
+    def test_21_cors_and_preflight_options_for_netlify(self):
+        """Kiểm thử CORS headers và preflight OPTIONS khi Netlify frontend giao tiếp với Render"""
+        with self.client as client:
+            # 1. Gửi request kèm header Origin từ Netlify
+            res = client.get("/api/auth/status", headers={"Origin": "https://watermark-app.netlify.app"})
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.headers.get("Access-Control-Allow-Origin"), "https://watermark-app.netlify.app")
+            self.assertEqual(res.headers.get("Access-Control-Allow-Credentials"), "true")
+
+            # 2. Gửi preflight OPTIONS request
+            res_options = client.options("/api/process", headers={"Origin": "https://watermark-app.netlify.app"})
+            self.assertEqual(res_options.status_code, 200)
+            self.assertEqual(res_options.headers.get("Access-Control-Allow-Origin"), "https://watermark-app.netlify.app")
+            self.assertIn("POST", res_options.headers.get("Access-Control-Allow-Methods", ""))
+
+    def test_22_netlify_frontend_packaging_integrity(self):
+        """Kiểm thử tính toàn vẹn của gói xuất bản Netlify (public/index.html, _redirects, static)"""
+        from pathlib import Path
+        import build_frontend
+
+        # Chạy đóng gói frontend
+        build_frontend.build()
+
+        public_dir = Path("public")
+        self.assertTrue((public_dir / "index.html").exists(), "public/index.html phải tồn tại")
+        self.assertTrue((public_dir / "_redirects").exists(), "public/_redirects phải tồn tại")
+        self.assertTrue((public_dir / "static" / "css" / "style.css").exists(), "public/static/css/style.css phải tồn tại")
+        self.assertTrue((public_dir / "static" / "js" / "app.js").exists(), "public/static/js/app.js phải tồn tại")
+
+        # Kiểm tra index.html không chứa cú pháp Jinja2 chưa biên dịch
+        html_text = (public_dir / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("{{", html_text, "index.html xuất bản Netlify không được chứa cú pháp Jinja {{")
+        self.assertNotIn("}}", html_text, "index.html xuất bản Netlify không được chứa cú pháp Jinja }}")
+
+        # Kiểm tra _redirects chứa đúng quy tắc proxy
+        redirects_text = (public_dir / "_redirects").read_text(encoding="utf-8")
+        self.assertIn("/api/*", redirects_text)
+        self.assertIn("https://watermark-nuwt.onrender.com/api/:splat", redirects_text)
+        self.assertIn("200!", redirects_text)
+
 if __name__ == "__main__":
     unittest.main()

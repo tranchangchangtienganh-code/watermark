@@ -79,9 +79,31 @@ document.addEventListener("DOMContentLoaded", () => {
     let selectedFile = null;
     let currentSessionData = null;
     let currentAuthState = { is_configured: false, is_admin: false, setup_token_required: false };
+    let currentCsrfToken = "";
 
     function getCsrfToken() {
-        return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || "";
+        if (currentCsrfToken) return currentCsrfToken;
+        const metaVal = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || "";
+        if (metaVal && !metaVal.includes("{{")) return metaVal;
+        return "";
+    }
+
+    async function ensureCsrfToken() {
+        let token = getCsrfToken();
+        if (token) return token;
+        try {
+            const res = await fetch("/api/csrf-token", { credentials: "include" });
+            const data = await res.json();
+            if (data && data.csrf_token) {
+                currentCsrfToken = data.csrf_token;
+                const meta = document.querySelector('meta[name="csrf-token"]');
+                if (meta) meta.setAttribute('content', data.csrf_token);
+                return data.csrf_token;
+            }
+        } catch (e) {
+            console.warn("Không thể lấy CSRF token tự động:", e);
+        }
+        return "";
     }
 
     // ==========================================
@@ -89,8 +111,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================
     async function checkAuthStatus() {
         try {
-            const res = await fetch("/api/auth/status");
+            const res = await fetch("/api/auth/status", { credentials: "include" });
             const data = await res.json();
+            if (data && data.csrf_token) {
+                currentCsrfToken = data.csrf_token;
+                const meta = document.querySelector('meta[name="csrf-token"]');
+                if (meta) meta.setAttribute("content", data.csrf_token);
+            }
             currentAuthState = data;
             applyAuthState(data);
             loadGallery();
@@ -228,11 +255,13 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!password) return;
 
             try {
+                const csrf = await ensureCsrfToken();
                 const res = await fetch("/api/auth/login", {
                     method: "POST",
+                    credentials: "include",
                     headers: {
                         "Content-Type": "application/json",
-                        "X-CSRF-Token": getCsrfToken()
+                        "X-CSRF-Token": csrf
                     },
                     body: JSON.stringify({ password })
                 });
@@ -293,11 +322,13 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             try {
+                const csrf = await ensureCsrfToken();
                 const res = await fetch("/api/auth/setup", {
                     method: "POST",
+                    credentials: "include",
                     headers: {
                         "Content-Type": "application/json",
-                        "X-CSRF-Token": getCsrfToken()
+                        "X-CSRF-Token": csrf
                     },
                     body: JSON.stringify({ password, confirm_password: confirm, setup_token: setupToken })
                 });
@@ -320,10 +351,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnLogout) {
         btnLogout.addEventListener("click", async () => {
             try {
+                const csrf = await ensureCsrfToken();
                 const res = await fetch("/api/auth/logout", {
                     method: "POST",
+                    credentials: "include",
                     headers: {
-                        "X-CSRF-Token": getCsrfToken()
+                        "X-CSRF-Token": csrf
                     }
                 });
                 const data = await res.json();
@@ -366,11 +399,13 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             try {
+                const csrf = await ensureCsrfToken();
                 const res = await fetch("/api/auth/change-password", {
                     method: "POST",
+                    credentials: "include",
                     headers: {
                         "Content-Type": "application/json",
-                        "X-CSRF-Token": getCsrfToken()
+                        "X-CSRF-Token": csrf
                     },
                     body: JSON.stringify({
                         current_password: currentPassword,
@@ -555,10 +590,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 highlightNode(nodeWatermark, "active");
             }, 600);
 
+            const csrf = await ensureCsrfToken();
             const response = await fetch("/api/process", {
                 method: "POST",
+                credentials: "include",
                 headers: {
-                    "X-CSRF-Token": getCsrfToken()
+                    "X-CSRF-Token": csrf
                 },
                 body: formData
             });
@@ -638,7 +675,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================
     async function loadGallery() {
         try {
-            const res = await fetch("/api/gallery");
+            const res = await fetch("/api/gallery", { credentials: "include" });
             const data = await res.json();
             if (data.success && data.items && data.items.length > 0) {
                 galleryGrid.innerHTML = "";
@@ -715,10 +752,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 form.append("sha256", expectedHashInput.value.trim());
 
                 try {
+                    const csrf = await ensureCsrfToken();
                     const res = await fetch("/api/verify-integrity", {
                         method: "POST",
+                        credentials: "include",
                         headers: {
-                            "X-CSRF-Token": getCsrfToken()
+                            "X-CSRF-Token": csrf
                         },
                         body: form
                     });

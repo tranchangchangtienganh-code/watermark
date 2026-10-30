@@ -80,13 +80,41 @@ Vào mục **Environment** trên Render và thiết lập các biến sau:
 
 ---
 
-## 🧪 Kết Quả Kiểm Thử Toàn Diện (12/12 Tests Passed)
+## 🌐 HƯỚNG DẪN TRIỂN KHAI NETLIFY FRONTEND (KẾT HỢP BACKEND RENDER)
+
+Hệ thống hỗ trợ kiến trúc kết hợp hiện đại:
+- **Frontend**: Triển khai trên **Netlify** (Global Edge CDN, tải cực nhanh, miễn phí).
+- **Backend**: Tiếp tục chạy trên **Render** (`https://watermark-nuwt.onrender.com`).
+- **Cơ chế kết nối**: **Same-Origin API Reverse Proxy** (Netlify chuyển tiếp trong suốt mọi yêu cầu `/api/*` về Render với mã trạng thái HTTP 200).
+
+### 1. Thông Số Cấu Hình Trên Netlify (Add New Site ➔ Import an existing project)
+
+1. Đăng nhập [Netlify](https://app.netlify.com/) ➔ Chọn **Add new site** ➔ **Import an existing project**.
+2. Chọn **GitHub** ➔ Cấp quyền và chọn repository `watermark`.
+3. Điền các thông số triển khai:
+   - **Base directory**: *(để trống)*
+   - **Build command**: `python build_frontend.py`
+   - **Publish directory**: `public`
+4. Bấm **Deploy watermark**.
+
+### 2. Ưu Điểm Của Kiến Trúc Same-Origin Proxy Trên Netlify
+
+- **Không bị chặn Cookie trên iPhone Safari & iPad**:
+  Do trình duyệt gọi `/api/*` trên chính domain của Netlify (`https://<ten-site>.netlify.app/api/...`), cookie phiên làm việc (`session`) được trình duyệt xử lý như **First-Party Cookie**, hoàn toàn không bị tính năng ITP (Intelligent Tracking Prevention) của iOS/iPadOS chặn lại.
+- **Tương thích 100% với CSRF Protection**:
+  CSRF token được đồng bộ tự động giữa Frontend Netlify và Backend Render.
+- **Bảo mật tuyệt đối**:
+  Không để lộ bất kỳ thông tin nhạy cảm, mật khẩu, token hay đường dẫn tệp nội bộ nào trong mã nguồn frontend tĩnh.
+
+---
+
+## 🧪 Kết Quả Kiểm Thử Toàn Diện (22/22 Tests Passed)
 
 Chạy bộ kiểm thử tự động tại máy cục bộ hoặc CI/CD:
 ```powershell
 python test_suite.py
 ```
-**Kết quả: 12/12 bài test đạt 100% (OK)**:
+**Kết quả: 22/22 bài test đạt 100% (OK)**:
 1. `test_01_unauthenticated_user_cannot_access_editing_api`: Chặn khách gọi API chỉnh sửa (HTTP 401).
 2. `test_02_unauthenticated_user_cannot_change_password`: Chặn khách đổi mật khẩu (HTTP 401).
 3. `test_03_admin_login_success_and_session_persistence`: Đăng nhập quản trị và lưu session thành công.
@@ -98,6 +126,17 @@ python test_suite.py
 9. `test_09_csrf_protection_enforcement`: Bắt buộc token CSRF, chặn đứng các yêu cầu giả mạo từ bên ngoài (HTTP 403).
 10. `test_10_first_run_setup_token_protection`: Chống chiếm đoạt quyền quản trị khi triển khai public bằng Setup Token.
 11. `test_11_proxy_fix_https_and_forwarding`: Hoạt động chuẩn xác sau Render Reverse Proxy với tiêu đề X-Forwarded-*.
+12. `test_12_production_wsgi_app_exposed`: Ứng dụng WSGI app:app tương thích hoàn hảo với Gunicorn trên Render.
+13. `test_13_zero_leak_logging_no_secrets_in_logs`: Đảm bảo không in token hay mật khẩu ra console/logs.
+14. `test_14_anti_hijacking_lockout_on_production`: Khóa thiết lập 403 Forbidden khi thiếu biến môi trường bí mật trên Render.
+15. `test_15_setup_token_brute_force_rate_limiting`: Rate limiting 5 lần thử mã kích hoạt trên /api/auth/setup.
+16. `test_16_credentials_persistence_across_render_free_restarts`: Quyền quản trị bền vững qua các lần container ngủ đông/redeploy.
+17. `test_17_documents_persistence_and_cache_eviction`: Tệp tải lên và thành phẩm bền vững qua các chu kỳ xóa cache RAM.
+18. `test_18_admin_setup_token_quotes_and_whitespace_handling`: Chuẩn hóa ngoặc kép và khoảng trắng cho ADMIN_SETUP_TOKEN.
+19. `test_19_admin_setup_token_and_setup_token_coexistence`: Chấp nhận song song cả ADMIN_SETUP_TOKEN và SETUP_TOKEN.
+20. `test_20_csrf_token_endpoint_and_auth_status_sync`: Cấp phát và đồng bộ CSRF token cho Frontend Netlify/SPA tĩnh.
+21. `test_21_cors_and_preflight_options_for_netlify`: CORS headers và preflight OPTIONS khi Netlify gọi Render.
+22. `test_22_netlify_frontend_packaging_integrity`: Tính toàn vẹn của gói xuất bản Netlify (public/index.html, _redirects, static).
 12. `test_12_production_wsgi_app_exposed`: Ứng dụng `app:app` tương thích 100% với Gunicorn và tắt debug mode trong production.
 
 ---
