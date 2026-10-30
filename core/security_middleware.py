@@ -19,36 +19,35 @@ from config import ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
 
 def admin_required(fn):
     """
-    Decorator kiểm tra quyền Quản trị viên từ Flask Session hoặc Owner Key:
-    - Cho phép nếu phiên session đang có quyền quản trị
-    - Tự động xác thực nếu yêu cầu mang mã khóa chủ sở hữu hợp lệ (X-Owner-Key, Bearer token hoặc query param)
+    Decorator kiểm tra quyền Quản trị viên từ Flask Session hoặc Authorization Header:
+    - Cho phép nếu phiên session đang có quyền quản trị và tự động gia hạn phiên (Sliding Renewal)
+    - Cho phép qua header Authorization (Bearer token hoặc X-Owner-Key) cho API
+    - TUYỆT ĐỐI KHÔNG chấp nhận khóa bí mật trên URL query parameters (?key=...) để bảo mật
     - Tuyệt đối từ chối (HTTP 401) mọi yêu cầu công khai chưa xác thực
     """
     @wraps(fn)
     def decorated_view(*args, **kwargs):
-        # 1. Kiểm tra session hiện tại
+        # 1. Kiểm tra session hiện tại (HttpOnly Cookie)
         if session.get("is_admin"):
+            session.permanent = True
+            session.modified = True  # Kích hoạt gia hạn trượt an toàn (Sliding Renewal)
             return fn(*args, **kwargs)
 
-        # 2. Kiểm tra xác thực một chạm qua Owner Key / Token
+        # 2. Hỗ trợ xác thực API qua HTTP Header (Chỉ dùng Header, KHÔNG dùng URL)
         from core.admin_auth import AdminAuthManager
         auth_header = request.headers.get("Authorization", "")
         bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
-        owner_key = (
-            request.headers.get("X-Owner-Key")
-            or bearer_key
-            or request.args.get("key")
-            or request.args.get("owner_key")
-        )
-        if owner_key and AdminAuthManager.validate_owner_key(owner_key):
+        header_key = request.headers.get("X-Owner-Key") or bearer_key
+        if header_key and AdminAuthManager.validate_owner_key(header_key):
             session["is_admin"] = True
             session.permanent = True
+            session.modified = True
             return fn(*args, **kwargs)
 
         return jsonify({
             "success": False,
             "node": "middleware-security",
-            "error": "Yêu cầu quyền Quản trị viên để thực hiện thao tác này. Vui lòng xác thực quyền chủ sở hữu.",
+            "error": "Yêu cầu quyền Quản trị viên để thực hiện thao tác này. Vui lòng đăng nhập.",
             "requires_auth": True
         }), 401
     return decorated_view

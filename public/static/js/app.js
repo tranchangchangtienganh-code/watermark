@@ -81,35 +81,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentAuthState = { is_configured: false, is_admin: false, setup_token_required: false };
     let currentCsrfToken = "";
 
-    // ==========================================
-    // 0. QUẢN LÝ KHÓA TRUY CẬP CHỦ SỞ HỮU (Ms. Trang)
-    // ==========================================
-    const OWNER_KEY_STORAGE = "watermark_owner_key";
-
-    function getOwnerKey() {
-        return localStorage.getItem(OWNER_KEY_STORAGE) || "";
-    }
-
-    function setOwnerKey(key) {
-        if (key && typeof key === "string" && key.trim()) {
-            localStorage.setItem(OWNER_KEY_STORAGE, key.trim());
-        }
-    }
-
-    function removeOwnerKey() {
-        localStorage.removeItem(OWNER_KEY_STORAGE);
-    }
-
-    // Tự động nhận diện ?key=... hoặc ?owner_key=... trên URL (Private Access Bookmark)
-    const urlParams = new URLSearchParams(window.location.search);
-    const keyFromUrl = urlParams.get("key") || urlParams.get("owner_key");
-    if (keyFromUrl) {
-        setOwnerKey(keyFromUrl);
-        // Làm sạch URL trên thanh địa chỉ trình duyệt để bảo mật khi chia sẻ màn hình
-        const cleanPath = window.location.pathname;
-        window.history.replaceState({}, document.title, cleanPath);
-    }
-
     function getCsrfToken() {
         if (currentCsrfToken) return currentCsrfToken;
         const metaVal = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || "";
@@ -140,15 +111,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================
     async function checkAuthStatus() {
         try {
-            const headers = {};
-            const ownerKey = getOwnerKey();
-            if (ownerKey) {
-                headers["X-Owner-Key"] = ownerKey;
-            }
-            const res = await fetch("/api/auth/status", {
-                credentials: "include",
-                headers: headers
-            });
+            const res = await fetch("/api/auth/status", { credentials: "include" });
             const data = await res.json();
             if (data && data.csrf_token) {
                 currentCsrfToken = data.csrf_token;
@@ -291,9 +254,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const password = inputAdminPassword.value.trim();
             if (!password) return;
 
-            const chkRemember = document.getElementById("chkRememberOwner");
-            const shouldRemember = chkRemember ? chkRemember.checked : true;
-
             try {
                 const csrf = await ensureCsrfToken();
                 const res = await fetch("/api/auth/login", {
@@ -301,8 +261,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     credentials: "include",
                     headers: {
                         "Content-Type": "application/json",
-                        "X-CSRF-Token": csrf,
-                        "X-Owner-Key": password
+                        "X-CSRF-Token": csrf
                     },
                     body: JSON.stringify({ password })
                 });
@@ -310,10 +269,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (data.success) {
                     modalAdminLogin.style.display = "none";
-                    if (shouldRemember) {
-                        setOwnerKey(password);
-                    }
-                    showToast("Xác thực quyền Chủ sở hữu (Ms. Trang) thành công!", "success");
+                    showToast("Đăng nhập quyền Quản trị viên thành công!", "success");
                     await checkAuthStatus();
                 } else {
                     loginRateWarning.textContent = data.error || "Mật khẩu không chính xác.";
@@ -380,7 +336,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (data.success) {
                     modalAdminSetup.style.display = "none";
-                    setOwnerKey(password);
                     showToast("Khởi tạo quản trị viên thành công! Bạn đã đăng nhập.", "success");
                     await checkAuthStatus();
                 } else {
@@ -396,7 +351,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (btnLogout) {
         btnLogout.addEventListener("click", async () => {
             try {
-                removeOwnerKey();
                 const csrf = await ensureCsrfToken();
                 const res = await fetch("/api/auth/logout", {
                     method: "POST",
@@ -407,7 +361,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
                 const data = await res.json();
                 if (data.success) {
-                    showToast("Đã chuyển về chế độ Khách xem.", "info");
+                    showToast("Đã đăng xuất khỏi phiên làm việc.", "info");
                     await checkAuthStatus();
                 }
             } catch (err) {
@@ -637,18 +591,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }, 600);
 
             const csrf = await ensureCsrfToken();
-            const processHeaders = {
-                "X-CSRF-Token": csrf
-            };
-            const ownerKey = getOwnerKey();
-            if (ownerKey) {
-                processHeaders["X-Owner-Key"] = ownerKey;
-            }
-
             const response = await fetch("/api/process", {
                 method: "POST",
                 credentials: "include",
-                headers: processHeaders,
+                headers: {
+                    "X-CSRF-Token": csrf
+                },
                 body: formData
             });
 
@@ -711,11 +659,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (currentAuthState.is_admin && btnDownloadOriginal) {
             btnDownloadOriginal.style.display = "inline-flex";
             btnDownloadOriginal.onclick = () => {
-                const ownerKey = getOwnerKey();
-                const url = ownerKey 
-                    ? `/api/download-original/${data.session_id}?key=${encodeURIComponent(ownerKey)}`
-                    : `/api/download-original/${data.session_id}`;
-                window.location.href = url;
+                window.location.href = `/api/download-original/${data.session_id}`;
             };
         } else if (btnDownloadOriginal) {
             btnDownloadOriginal.style.display = "none";

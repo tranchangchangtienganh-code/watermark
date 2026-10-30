@@ -359,33 +359,33 @@
       </div>
 
       <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-        Nhập mật khẩu quản trị hoặc mã khóa chủ sở hữu (Owner Key) để mở khóa toàn bộ quyền chỉnh sửa watermark, tải lên tệp mới và bảo vệ bản quyền.
+        Nhập mật khẩu quản trị để mở khóa toàn bộ quyền chỉnh sửa watermark, thay thế ảnh/tệp gốc và tải về thành phẩm.
       </p>
 
       <div class="rate-limit-warning" id="loginRateWarning"></div>
 
       <form id="formAdminLogin">
         <div class="form-group">
-          <label class="form-label">Mật Khẩu hoặc Mã Khóa Chủ Sở Hữu:</label>
+          <label class="form-label">Mật Khẩu Quản Trị Viên:</label>
           <div class="input-with-icon">
-            <input type="password" id="inputAdminPassword" class="form-input" placeholder="Nhập mật khẩu hoặc Owner Key..." required>
+            <input type="password" id="inputAdminPassword" class="form-input" placeholder="Nhập mật khẩu quản trị..." required>
             <button type="button" class="input-icon-btn" id="btnToggleLoginPass" title="Hiện/Ẩn">👁️</button>
           </div>
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
-          <input type="checkbox" id="chkRememberOwner" checked style="width: 16px; height: 16px; cursor: pointer;">
-          <label for="chkRememberOwner" style="font-size: 13px; color: #475569; cursor: pointer;">
-            Ghi nhớ vĩnh viễn trên thiết bị này (1 năm)
+          <input type="checkbox" id="chkRememberOwner" checked disabled style="width: 16px; height: 16px; cursor: default;">
+          <label for="chkRememberOwner" style="font-size: 13px; color: #475569;">
+            Duy trì đăng nhập an toàn (Tự động gia hạn phiên)
           </label>
         </div>
 
         <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 8px;">
-          💡 <em>Mẹo: Bạn có thể lưu liên kết truy cập nhanh <code>?key=...</code> vào Bookmark trình duyệt để tự động mở khóa mọi lúc mà không cần nhập lại mật khẩu.</em>
+          🔒 <em>Phiên đăng nhập được bảo mật bằng HttpOnly, Secure Cookie và tự động gia hạn an toàn khi bạn thao tác. Không lưu trữ mật khẩu trên URL hay bộ nhớ công khai.</em>
         </p>
 
         <button type="submit" class="btn-primary" id="btnSubmitLogin" style="margin-top: 12px;">
-          Xác Thực & Mở Khóa Quyền
+          Đăng Nhập & Mở Khóa Quyền
         </button>
       </form>
     </div>

@@ -815,28 +815,50 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
         finally:
             os.environ.pop("OWNER_KEY", None)
 
-    def test_26_permanent_session_lifetime_one_year(self):
-        """Kiểm thử cấu hình phiên làm việc vĩnh viễn 365 ngày (1 năm) cho chủ sở hữu"""
+    def test_26_reasonable_session_lifetime_and_httponly_cookie(self):
+        """Kiểm thử cấu hình phiên làm việc hợp lý (30 ngày) kèm HttpOnly, SameSite và gia hạn an toàn"""
         lifetime = app.config.get("PERMANENT_SESSION_LIFETIME")
-        self.assertEqual(lifetime, 31536000, "PERMANENT_SESSION_LIFETIME phải là 31,536,000 giây (365 ngày)")
+        self.assertEqual(lifetime, 2592000, "PERMANENT_SESSION_LIFETIME phải là 2,592,000 giây (30 ngày)")
+        self.assertTrue(app.config.get("SESSION_COOKIE_HTTPONLY"), "Cookie phiên phải có cờ HttpOnly")
+        self.assertEqual(app.config.get("SESSION_COOKIE_SAMESITE"), "Lax", "Cookie phiên phải có cờ SameSite=Lax")
+        self.assertTrue(app.config.get("SESSION_REFRESH_EACH_REQUEST"), "Phải kích hoạt tự động gia hạn phiên (Sliding Renewal)")
 
-    def test_27_private_access_link_query_param(self):
-        """Kiểm thử liên kết truy cập riêng tư (?key=...) tự động cấp quyền Quản trị viên"""
-        test_key = "MsTrangBookmarkUrlKey2026"
+    def test_27_query_parameter_key_strictly_rejected(self):
+        """Kiểm thử: Khóa bí mật trên URL query parameters (?key=...) TUYỆT ĐỐI BỊ TỪ CHỐI không cấp quyền"""
+        test_key = "MsTrangSecretUrlKey2026"
         os.environ["OWNER_KEY"] = test_key
         try:
             fresh_client = app.test_client()
 
-            # 1. Gọi /api/auth/status kèm query param ?key=...
+            # 1. Gọi /api/auth/status kèm query param ?key=... -> KHÔNG được cấp quyền admin (is_admin = False)
             res = fresh_client.get(f"/api/auth/status?key={test_key}")
             self.assertEqual(res.status_code, 200)
-            self.assertTrue(res.get_json()["is_admin"], "Truy cập kèm ?key hợp lệ phải tự động kích hoạt is_admin")
+            self.assertFalse(res.get_json()["is_admin"], "Truy cập URL kèm ?key KHÔNG được tự động cấp quyền (Bảo mật lịch sử duyệt web)")
 
-            # 2. Yêu cầu tiếp theo trong cùng phiên không cần kèm param vẫn giữ quyền admin (365 ngày)
-            res_subsequent = fresh_client.get("/api/auth/status")
-            self.assertTrue(res_subsequent.get_json()["is_admin"], "Phiên session dài hạn phải duy trì quyền admin")
+            # 2. Gọi trang chủ / kèm ?owner_key=... -> KHÔNG được lưu quyền admin vào session
+            res_index = fresh_client.get(f"/?key={test_key}")
+            self.assertEqual(res_index.status_code, 200)
+            res_check = fresh_client.get("/api/auth/status")
+            self.assertFalse(res_check.get_json()["is_admin"], "Session phải giữ nguyên trạng thái chưa xác thực")
         finally:
             os.environ.pop("OWNER_KEY", None)
+
+    def test_28_sliding_session_renewal_on_active_usage(self):
+        """Kiểm thử cơ chế gia hạn trượt an toàn (Sliding Session Renewal) khi chủ sở hữu tương tác"""
+        with self.client as client:
+            # 1. Đăng nhập hợp lệ
+            res_login = client.post("/api/auth/login", json={"password": TEST_PASSWORD})
+            self.assertEqual(res_login.status_code, 200)
+            self.assertTrue(res_login.get_json()["is_admin"])
+
+            # 2. Truy cập /api/auth/status trong phiên hoạt động
+            res_status = client.get("/api/auth/status")
+            self.assertEqual(res_status.status_code, 200)
+            self.assertTrue(res_status.get_json()["is_admin"])
+
+            # 3. Đảm bảo session cookie vẫn duy trì quyền quản trị hợp lệ
+            res_process_check = client.get("/api/auth/status")
+            self.assertTrue(res_process_check.get_json()["is_admin"], "Phiên phải duy trì quyền admin qua các tương tác")
 
 if __name__ == "__main__":
     unittest.main()

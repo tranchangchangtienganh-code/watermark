@@ -40,9 +40,11 @@ ALLOWED_EXTENSIONS = {
     "webp": ["image/webp"]
 }
 
-# Thời gian hết hạn của phiên làm việc (giây) - Mặc định lưu trữ phiên 365 ngày cho chủ sở hữu duy nhất
-SESSION_LIFETIME_SECONDS = int(os.environ.get("SESSION_LIFETIME_SECONDS", 31536000))
-PERMANENT_SESSION_LIFETIME = int(os.environ.get("PERMANENT_SESSION_LIFETIME", 31536000))
+# Thời gian phiên làm việc hợp lý với cơ chế tự động gia hạn trượt an toàn (Sliding Session Renewal)
+# Mặc định 30 ngày (2,592,000 giây) - Tự động gia hạn an toàn mỗi khi chủ sở hữu thao tác
+SESSION_LIFETIME_DAYS = int(os.environ.get("SESSION_LIFETIME_DAYS", 30))
+SESSION_LIFETIME_SECONDS = int(os.environ.get("SESSION_LIFETIME_SECONDS", SESSION_LIFETIME_DAYS * 86400))
+PERMANENT_SESSION_LIFETIME = int(os.environ.get("PERMANENT_SESSION_LIFETIME", SESSION_LIFETIME_SECONDS))
 
 # Chế độ Chủ sở hữu duy nhất (Single-Owner Mode - Dành riêng cho Ms. Trang)
 SINGLE_OWNER_MODE = os.environ.get("SINGLE_OWNER_MODE", "true").lower() == "true"

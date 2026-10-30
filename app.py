@@ -43,7 +43,8 @@ app.config["SECRET_KEY"] = SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["PERMANENT_SESSION_LIFETIME"] = PERMANENT_SESSION_LIFETIME  # 365 ngày cho chủ sở hữu
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = PERMANENT_SESSION_LIFETIME  # Thời gian phiên hợp lý (30 ngày) kèm gia hạn tự động
 
 # Kích hoạt Secure Cookie khi chạy trên môi trường đám mây có HTTPS
 if IS_PRODUCTION:
@@ -75,7 +76,7 @@ def check_private_site_access():
         # Cho phép nếu đã có phiên admin hoặc mang X-Owner-Key hợp lệ
         if session.get("is_admin"):
             return
-        key = request.headers.get("X-Owner-Key") or request.args.get("key")
+        key = request.headers.get("X-Owner-Key")
         if key and AdminAuthManager.validate_owner_key(key):
             return
         return ("Trang web riêng tư của Ms. Trang. Vui lòng nhập thông tin xác thực.", 401, {
@@ -152,11 +153,9 @@ def request_entity_too_large(error):
 @app.route("/")
 def index():
     """Giao diện chính: Tự động thích ứng chế độ Khách (Read-Only) hoặc Quản trị viên (Full Edit)"""
-    # Nếu có ?key=... hoặc ?owner_key=... trên URL khi truy cập trực tiếp Flask, kiểm tra và cấp quyền luôn
-    key_param = request.args.get("key") or request.args.get("owner_key")
-    if key_param and AdminAuthManager.validate_owner_key(key_param):
-        session["is_admin"] = True
+    if session.get("is_admin"):
         session.permanent = True
+        session.modified = True
 
     is_admin = session.get("is_admin", False)
     is_configured = AdminAuthManager.is_configured()
@@ -171,18 +170,19 @@ def auth_status():
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_hex(32)
 
-    # Tự động nhận diện Owner Key từ header hoặc tham số truy vấn
-    auth_header = request.headers.get("Authorization", "")
-    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
-    owner_key = (
-        request.headers.get("X-Owner-Key")
-        or bearer_key
-        or request.args.get("key")
-        or request.args.get("owner_key")
-    )
-    if owner_key and AdminAuthManager.validate_owner_key(owner_key):
-        session["is_admin"] = True
+    # Nếu phiên đang đăng nhập, tự động gia hạn an toàn (Sliding Renewal)
+    if session.get("is_admin"):
         session.permanent = True
+        session.modified = True
+    else:
+        # Hỗ trợ xác thực qua Authorization Bearer hoặc X-Owner-Key header (TUYỆT ĐỐI KHÔNG dùng URL query)
+        auth_header = request.headers.get("Authorization", "")
+        bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+        header_key = request.headers.get("X-Owner-Key") or bearer_key
+        if header_key and AdminAuthManager.validate_owner_key(header_key):
+            session["is_admin"] = True
+            session.permanent = True
+            session.modified = True
 
     return jsonify({
         "success": True,
