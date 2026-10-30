@@ -397,9 +397,12 @@
       <form id="formAdminSetup">
         <div class="form-group" id="setupTokenGroup" style="display: none;">
           <label class="form-label">Mã Kích Hoạt Thiết Lập (Setup Token):</label>
-          <input type="password" id="inputSetupToken" class="form-input" placeholder="Nhập mã Setup Token nếu được cung cấp trên Render...">
+          <div style="position: relative;">
+            <input type="password" id="inputSetupToken" class="form-input" placeholder="Nhập mã Setup Token (từ ADMIN_SETUP_TOKEN trên Render)..." style="padding-right: 40px;">
+            <button type="button" id="btnToggleSetupToken" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-muted);" title="Ẩn/Hiện token">👁️</button>
+          </div>
           <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
-            🔒 <em>Mã bảo mật chống chiếm đoạt quyền quản trị khi triển khai trên đám mây công khai.</em>
+            🔒 <em>Mã bảo mật chống chiếm đoạt quyền quản trị (khớp với biến ADMIN_SETUP_TOKEN hoặc SETUP_TOKEN trên Render).</em>
           </p>
         </div>
 

@@ -72,7 +72,7 @@ SECRET_KEY = _get_or_create_secret_key()
 # Cấu hình bảo mật khởi tạo quản trị viên ban đầu (Chống First-Run Exploit trên Render)
 ADMIN_INITIAL_PASSWORD = os.environ.get("ADMIN_INITIAL_PASSWORD")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
-SETUP_TOKEN = os.environ.get("SETUP_TOKEN") or os.environ.get("ADMIN_SETUP_TOKEN")
+SETUP_TOKEN = os.environ.get("ADMIN_SETUP_TOKEN") or os.environ.get("SETUP_TOKEN")
 
 # Cấu hình Lưu trữ Đám mây (Tùy chọn cho Render Free Persistence: Cloudflare R2, AWS S3, Supabase)
 S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL")

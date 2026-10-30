@@ -608,5 +608,85 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
         # Dọn dẹp
         SessionStorage.delete_session(sid)
 
+    def test_18_admin_setup_token_quotes_and_whitespace_handling(self):
+        """Kiểm thử chuẩn hóa ADMIN_SETUP_TOKEN có chứa dấu ngoặc kép, khoảng trắng và ký tự xuống dòng"""
+        backup_auth = AUTH_FILE.read_text(encoding="utf-8") if AUTH_FILE.exists() else None
+        if AUTH_FILE.exists():
+            AUTH_FILE.unlink()
+
+        old_admin_token = os.environ.get("ADMIN_SETUP_TOKEN")
+        old_token = os.environ.get("SETUP_TOKEN")
+
+        # Giả lập Render dashboard có cấu hình chứa ngoặc kép và khoảng trắng: "  RenderToken2026! \r\n"
+        os.environ["ADMIN_SETUP_TOKEN"] = '  "RenderToken2026!" \r\n '
+        os.environ.pop("SETUP_TOKEN", None)
+
+        try:
+            # 1. Người dùng nhập token sạch (không có ngoặc kép): RenderToken2026!
+            # Hệ thống phải tự động chuẩn hóa và so khớp thành công!
+            success, msg = AdminAuthManager.setup_admin("Password123!", setup_token="RenderToken2026!")
+            self.assertTrue(success, f"Setup phải thành công khi chuỗi token sạch so với env có ngoặc kép: {msg}")
+
+            # Xóa auth file để test chiều ngược lại
+            AUTH_FILE.unlink()
+
+            # 2. Người dùng nhập token có ngoặc kép trên web: "RenderToken2026!"
+            # Env không có ngoặc kép: RenderToken2026!
+            os.environ["ADMIN_SETUP_TOKEN"] = "RenderToken2026!"
+            success2, msg2 = AdminAuthManager.setup_admin("Password123!", setup_token='"RenderToken2026!"')
+            self.assertTrue(success2, f"Setup phải thành công khi input có ngoặc kép: {msg2}")
+        finally:
+            if old_admin_token is not None:
+                os.environ["ADMIN_SETUP_TOKEN"] = old_admin_token
+            else:
+                os.environ.pop("ADMIN_SETUP_TOKEN", None)
+            if old_token is not None:
+                os.environ["SETUP_TOKEN"] = old_token
+            else:
+                os.environ.pop("SETUP_TOKEN", None)
+
+            if backup_auth:
+                AUTH_FILE.write_text(backup_auth, encoding="utf-8")
+            else:
+                AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
+
+    def test_19_admin_setup_token_and_setup_token_coexistence(self):
+        """Kiểm thử tương thích song song: Cả ADMIN_SETUP_TOKEN lẫn SETUP_TOKEN đều được chấp nhận"""
+        backup_auth = AUTH_FILE.read_text(encoding="utf-8") if AUTH_FILE.exists() else None
+        if AUTH_FILE.exists():
+            AUTH_FILE.unlink()
+
+        old_admin_token = os.environ.get("ADMIN_SETUP_TOKEN")
+        old_token = os.environ.get("SETUP_TOKEN")
+
+        # Giả lập Render có cả 2 biến môi trường
+        os.environ["ADMIN_SETUP_TOKEN"] = "TokenFromAdminEnv123"
+        os.environ["SETUP_TOKEN"] = "TokenFromSetupEnv456"
+
+        try:
+            # Nhập mã từ ADMIN_SETUP_TOKEN -> PHẢI THÀNH CÔNG
+            success, msg = AdminAuthManager.setup_admin("Password123!", setup_token="TokenFromAdminEnv123")
+            self.assertTrue(success, f"Mã ADMIN_SETUP_TOKEN phải hợp lệ: {msg}")
+
+            AUTH_FILE.unlink()
+
+            # Nhập mã từ SETUP_TOKEN -> CŨNG PHẢI THÀNH CÔNG
+            success2, msg2 = AdminAuthManager.setup_admin("Password123!", setup_token="TokenFromSetupEnv456")
+            self.assertTrue(success2, f"Mã SETUP_TOKEN phải hợp lệ: {msg2}")
+        finally:
+            if old_admin_token is not None:
+                os.environ["ADMIN_SETUP_TOKEN"] = old_admin_token
+            else:
+                os.environ.pop("ADMIN_SETUP_TOKEN", None)
+            if old_token is not None:
+                os.environ["SETUP_TOKEN"] = old_token
+            else:
+                os.environ.pop("SETUP_TOKEN", None)
+
+            if backup_auth:
+                AUTH_FILE.write_text(backup_auth, encoding="utf-8")
+            else:
+                AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
+
 if __name__ == "__main__":
     unittest.main()

@@ -253,6 +253,19 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // Toggle ẩn/hiện Setup Token
+    const btnToggleSetupToken = document.getElementById("btnToggleSetupToken");
+    if (btnToggleSetupToken) {
+        btnToggleSetupToken.addEventListener("click", () => {
+            const input = document.getElementById("inputSetupToken");
+            if (input) {
+                const isPass = input.type === "password";
+                input.type = isPass ? "text" : "password";
+                btnToggleSetupToken.textContent = isPass ? "👁️‍🗨️" : "👁️";
+            }
+        });
+    }
+
     // Mở Modal Thiết Lập Ban Đầu
     if (btnOpenSetupModal) {
         btnOpenSetupModal.addEventListener("click", () => {
