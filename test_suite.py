@@ -405,5 +405,208 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
         self.assertTrue(callable(wsgi_app), "app.py phải expose đối tượng WSGI callable tên 'app'")
         self.assertFalse(wsgi_app.config["DEBUG"], "Flask debug mode phải tắt trong production")
 
+    def test_13_zero_leak_logging_no_secrets_in_logs(self):
+        """Kiểm thử Tiêu chuẩn Zero-Leak: Không bao giờ in token, mật khẩu hay mã băm ra log console"""
+        import sys
+        captured_output = io.StringIO()
+        old_stdout = sys.stdout
+
+        # Backup auth file
+        backup_auth = AUTH_FILE.read_text(encoding="utf-8") if AUTH_FILE.exists() else None
+        if AUTH_FILE.exists():
+            AUTH_FILE.unlink()
+
+        # Giả lập môi trường có SETUP_TOKEN bí mật
+        secret_test_token = "SuperSecretTokenNeverExposeToLogs999!"
+        old_token_env = os.environ.get("SETUP_TOKEN")
+        os.environ["SETUP_TOKEN"] = secret_test_token
+
+        try:
+            sys.stdout = captured_output
+            AdminAuthManager.init_app()
+            output = captured_output.getvalue()
+
+            # Khẳng định giá trị token bí mật TUYỆT ĐỐI KHÔNG xuất hiện trong stdout
+            self.assertNotIn(secret_test_token, output, "Setup token bí mật không được phép xuất hiện trong log stdout")
+            self.assertNotIn("One-Time Setup Token:", output, "Không được in thông báo lộ token ra console")
+        finally:
+            sys.stdout = old_stdout
+            if old_token_env is not None:
+                os.environ["SETUP_TOKEN"] = old_token_env
+            else:
+                os.environ.pop("SETUP_TOKEN", None)
+            if backup_auth:
+                AUTH_FILE.write_text(backup_auth, encoding="utf-8")
+            else:
+                AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
+
+    def test_14_anti_hijacking_lockout_on_production(self):
+        """Kiểm thử Khóa Chống Chiếm Đoạt Quyền: Từ chối 403 nếu môi trường Production chưa cấu hình token bí mật"""
+        backup_auth = AUTH_FILE.read_text(encoding="utf-8") if AUTH_FILE.exists() else None
+        if AUTH_FILE.exists():
+            AUTH_FILE.unlink()
+
+        old_render = os.environ.get("RENDER")
+        old_token = os.environ.get("SETUP_TOKEN")
+        old_admin_token = os.environ.get("ADMIN_SETUP_TOKEN")
+        old_pass = os.environ.get("ADMIN_INITIAL_PASSWORD")
+        old_hash = os.environ.get("ADMIN_PASSWORD_HASH")
+
+        os.environ["RENDER"] = "true"
+        os.environ.pop("SETUP_TOKEN", None)
+        os.environ.pop("ADMIN_SETUP_TOKEN", None)
+        os.environ.pop("ADMIN_INITIAL_PASSWORD", None)
+        os.environ.pop("ADMIN_PASSWORD_HASH", None)
+
+        try:
+            self.assertTrue(AdminAuthManager.is_setup_locked(), "is_setup_locked phải là True khi chạy trên Render mà thiếu biến môi trường bí mật")
+
+            with self.client as client:
+                res = client.post("/api/auth/setup", json={
+                    "password": "AttackerPassword123!",
+                    "confirm_password": "AttackerPassword123!"
+                })
+                # Người ngoài cố gắng chiếm quyền PHẢI BỊ CHẶN 403 FORBIDDEN
+                self.assertEqual(res.status_code, 403, "Phải từ chối 403 Forbidden khi quy trình thiết lập đang bị khóa chống chiếm đoạt")
+                data = res.get_json()
+                self.assertFalse(data["success"])
+                self.assertIn("chống chiếm đoạt quyền", data["error"])
+        finally:
+            if old_render is not None:
+                os.environ["RENDER"] = old_render
+            else:
+                os.environ.pop("RENDER", None)
+            if old_token is not None:
+                os.environ["SETUP_TOKEN"] = old_token
+            if old_admin_token is not None:
+                os.environ["ADMIN_SETUP_TOKEN"] = old_admin_token
+            if old_pass is not None:
+                os.environ["ADMIN_INITIAL_PASSWORD"] = old_pass
+            if old_hash is not None:
+                os.environ["ADMIN_PASSWORD_HASH"] = old_hash
+
+            if backup_auth:
+                AUTH_FILE.write_text(backup_auth, encoding="utf-8")
+            else:
+                AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
+
+    def test_15_setup_token_brute_force_rate_limiting(self):
+        """Kiểm thử Giới Hạn Tần Suất (Rate Limiting) trên API /api/auth/setup để chống dò mã token"""
+        backup_auth = AUTH_FILE.read_text(encoding="utf-8") if AUTH_FILE.exists() else None
+        if AUTH_FILE.exists():
+            AUTH_FILE.unlink()
+
+        test_ip = "192.168.1.99"
+        old_token = os.environ.get("SETUP_TOKEN")
+        os.environ["SETUP_TOKEN"] = "RealSecretToken123456"
+
+        try:
+            AdminAuthManager.reset_rate_limit(test_ip)
+
+            # Thử sai 5 lần liên tiếp
+            for i in range(5):
+                success, _ = AdminAuthManager.setup_admin(
+                    "AdminPassword123!",
+                    setup_token="WrongTokenGuess"
+                )
+                self.assertFalse(success)
+                AdminAuthManager.record_failed_attempt(test_ip)
+
+            # Lần thứ 6 kiểm tra rate limit
+            is_allowed, rem, lockout_sec = AdminAuthManager.check_rate_limit(test_ip)
+            self.assertFalse(is_allowed, "IP kẻ tấn công phải bị khóa sau 5 lần nhập sai mã setup token")
+            self.assertGreater(lockout_sec, 0)
+        finally:
+            AdminAuthManager.reset_rate_limit(test_ip)
+            if old_token is not None:
+                os.environ["SETUP_TOKEN"] = old_token
+            else:
+                os.environ.pop("SETUP_TOKEN", None)
+            if backup_auth:
+                AUTH_FILE.write_text(backup_auth, encoding="utf-8")
+            else:
+                AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
+
+    def test_16_credentials_persistence_across_render_free_restarts(self):
+        """Kiểm thử tính bền vững của quyền Quản trị qua các lần container Render Free khởi động lại"""
+        # Giả lập container vừa khởi động lại: ổ đĩa tạm mất auth_file
+        backup_auth = AUTH_FILE.read_text(encoding="utf-8") if AUTH_FILE.exists() else None
+        if AUTH_FILE.exists():
+            AUTH_FILE.unlink()
+
+        self.assertFalse(AdminAuthManager.is_configured(), "Trước khi init_app thì chưa cấu hình do ổ đĩa container vừa bị wipe")
+
+        # Giả lập biến môi trường ADMIN_INITIAL_PASSWORD được Render lưu trữ cố định
+        persistent_password = "PersistentRenderFreePassword2026!"
+        old_pass = os.environ.get("ADMIN_INITIAL_PASSWORD")
+        os.environ["ADMIN_INITIAL_PASSWORD"] = persistent_password
+
+        try:
+            # Ứng dụng khởi động lại trên Render Free (gọi init_app)
+            AdminAuthManager.init_app()
+
+            # Kiểm tra: Quản trị viên tự động được khôi phục thành công
+            self.assertTrue(AdminAuthManager.is_configured(), "Tài khoản quản trị viên phải tự động được khôi phục từ biến môi trường persistent")
+
+            # Đăng nhập bằng mật khẩu bền vững -> Phải thành công
+            success, msg = AdminAuthManager.authenticate(persistent_password, "127.0.0.1")
+            self.assertTrue(success, f"Đăng nhập thất bại: {msg}")
+        finally:
+            if old_pass is not None:
+                os.environ["ADMIN_INITIAL_PASSWORD"] = old_pass
+            else:
+                os.environ.pop("ADMIN_INITIAL_PASSWORD", None)
+            if backup_auth:
+                AUTH_FILE.write_text(backup_auth, encoding="utf-8")
+            else:
+                AdminAuthManager.setup_admin(TEST_PASSWORD, bypass_token=True)
+
+    def test_17_documents_persistence_and_cache_eviction(self):
+        """Kiểm thử tính toàn vẹn của tệp tải lên và thành phẩm qua các chu kỳ xóa cache bộ nhớ"""
+        # Tạo tệp PDF mẫu
+        doc = pymupdf.open()
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 72), "Tài liệu kiểm thử lưu trữ bền vững", fontsize=16)
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        # Tạo phiên lưu trữ
+        session = SessionStorage.create_session("tailieu_kiemthu.pdf", pdf_bytes, "pdf", "pdf", "testhash123")
+        sid = session["session_id"]
+
+        # Xử lý watermark bằng WatermarkController.execute
+        res = WatermarkController.execute(
+            file_type="pdf",
+            input_path=session["original_path"],
+            output_path=session["protected_path"],
+            preview_output_path=session["preview_path"],
+            watermark_text="TRẦN THỊ THU TRANG"
+        )
+        self.assertTrue(res["success"])
+
+        # Cập nhật session thành đã xử lý
+        SessionStorage.update_session(sid, {
+            "is_processed": True,
+            "protected_sha256": res.get("sha256", "hash123"),
+            "protected_size": os.path.getsize(session["protected_path"])
+        })
+
+        # Giả lập bộ nhớ RAM bị xóa (cache eviction) như khi container khởi động lại
+        SessionStorage._sessions_cache.clear()
+        self.assertNotIn(sid, SessionStorage._sessions_cache, "Cache bộ nhớ RAM đã được dọn sạch")
+
+        # Tải lại phiên từ ổ lưu trữ bền vững (Persistent Storage)
+        restored = SessionStorage.get_session(sid)
+        self.assertIsNotNone(restored, "Phiên làm việc phải được khôi phục thành công từ kho lưu trữ")
+        self.assertEqual(restored["session_id"], sid)
+
+        # Kiểm tra tải về thành phẩm
+        target = SessionStorage.get_download_target(sid)
+        self.assertIsNotNone(target, "Đường dẫn tải về thành phẩm phải còn nguyên vẹn")
+        self.assertTrue(os.path.exists(target[0]), "Tệp vật lý phải tồn tại trên ổ lưu trữ")
+
+        # Dọn dẹp
+        SessionStorage.delete_session(sid)
+
 if __name__ == "__main__":
     unittest.main()

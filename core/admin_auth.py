@@ -1,12 +1,14 @@
 """
 Hệ thống Xác thực Quản Trị Viên (Admin Authentication System)
 Chịu trách nhiệm:
-1. Quản lý thiết lập mật khẩu lần đầu (Secure Initial Setup & Anti-Exploit Protection)
-2. Tự động cấp quyền quản trị từ biến môi trường ADMIN_INITIAL_PASSWORD trên Render
-3. Bảo vệ quy trình thiết lập bằng SETUP_TOKEN trên môi trường sản xuất công khai
-4. Mã hóa và lưu trữ mật khẩu an toàn (Scrypt / Salted Password Hash)
-5. Giới hạn tần suất đăng nhập (Rate Limiting chống Brute-Force)
-6. Xác thực và đổi mật khẩu quản trị viên
+1. Quản lý thiết lập mật khẩu lần đầu (Secure Initial Setup & Anti-Hijacking Protection)
+2. Tự động cấp và khôi phục quyền quản trị từ biến môi trường ADMIN_INITIAL_PASSWORD / ADMIN_PASSWORD_HASH (Persistent across Render Free restarts)
+3. Bảo vệ quy trình thiết lập bằng SETUP_TOKEN hoặc ADMIN_SETUP_TOKEN trên môi trường sản xuất công khai
+4. Khóa chống chiếm đoạt (Anti-Hijacking Gate): Từ chối thiết lập khi chưa cấu hình token trên đám mây
+5. Tuyệt đối không in (Zero-Leak) token, mật khẩu hay mã băm ra log máy chủ
+6. Mã hóa và lưu trữ mật khẩu an toàn (Scrypt / Salted Password Hash)
+7. Giới hạn tần suất đăng nhập và thử mã thiết lập (Rate Limiting chống Brute-Force)
+8. Xác thực và đổi mật khẩu quản trị viên
 """
 import os
 import json
@@ -25,47 +27,83 @@ class AdminAuthManager:
     """Quản lý xác thực và phân quyền cho Quản trị viên (Ms. Trang)"""
 
     _failed_attempts: Dict[str, List[float]] = {}
-    _ephemeral_setup_token: Optional[str] = None
 
     @classmethod
     def init_app(cls):
-        """Khởi tạo và đồng bộ quyền Quản trị viên khi ứng dụng khởi động"""
-        # Nếu có biến môi trường ADMIN_INITIAL_PASSWORD và chưa cấu hình -> Tự động khởi tạo ngay lập tức
-        if ADMIN_INITIAL_PASSWORD and not cls.is_configured():
-            cls.setup_admin(ADMIN_INITIAL_PASSWORD, bypass_token=True)
-            print("[BẢO MẬT] Đã tự động khởi tạo tài khoản Quản trị viên từ biến môi trường ADMIN_INITIAL_PASSWORD.")
+        """
+        Khởi tạo và đồng bộ quyền Quản trị viên khi ứng dụng khởi động.
+        Đảm bảo tính bền vững (Persistence) qua các lần khởi động lại của Render Free:
+        - Khôi phục từ ADMIN_PASSWORD_HASH nếu có
+        - Hoặc tự động khởi tạo từ ADMIN_INITIAL_PASSWORD nếu có
+        - Hủy bỏ và vô hiệu hóa vĩnh viễn các token cũ bị lộ
+        - Tuyệt đối không in bất kỳ token hay mật khẩu nào ra log console
+        """
+        # Hủy bỏ và xóa triệt để mọi tệp token tạm thời cũ nếu còn tồn tại
+        old_token_file = DATA_DIR / ".setup_token"
+        if old_token_file.exists():
+            try:
+                old_token_file.unlink()
+            except Exception:
+                pass
+
+        # 1. Khôi phục trực tiếp từ mã băm môi trường ADMIN_PASSWORD_HASH (Duy trì bền vững trên Render Free)
+        env_hash = os.environ.get("ADMIN_PASSWORD_HASH")
+        if env_hash and not cls.is_configured():
+            now = time.time()
+            auth_data = {
+                "password_hash": env_hash.strip(),
+                "created_at": now,
+                "updated_at": now,
+                "last_login": None
+            }
+            AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(AUTH_FILE, "w", encoding="utf-8") as f:
+                json.dump(auth_data, f, ensure_ascii=False, indent=2)
+            print("[BẢO MẬT] Đã đồng bộ tài khoản Quản trị viên từ cấu hình môi trường bảo mật (ADMIN_PASSWORD_HASH).")
             return
 
-        # Nếu chưa cấu hình và trên môi trường Production mà không có SETUP_TOKEN trong env
-        # Tự động sinh One-Time Setup Token để ngăn chặn bất kỳ ai bên ngoài chiếm đoạt quyền quản trị
-        if not cls.is_configured() and not SETUP_TOKEN and IS_PRODUCTION:
-            token_file = DATA_DIR / ".setup_token"
-            if token_file.exists():
-                try:
-                    cls._ephemeral_setup_token = token_file.read_text(encoding="utf-8").strip()
-                except Exception:
-                    cls._ephemeral_setup_token = secrets.token_hex(16)
-            else:
-                cls._ephemeral_setup_token = secrets.token_hex(16)
-                try:
-                    token_file.write_text(cls._ephemeral_setup_token, encoding="utf-8")
-                except Exception:
-                    pass
-            print("=" * 60)
-            print("[CẢNH BÁO BẢO MẬT RENDER] Hệ thống chưa có mật khẩu Quản trị viên.")
-            print(f"[*] Mã kích hoạt thiết lập an toàn (One-Time Setup Token): {cls._ephemeral_setup_token}")
-            print("[*] Vui lòng sử dụng mã này trên giao diện hoặc đặt biến môi trường ADMIN_INITIAL_PASSWORD.")
-            print("=" * 60)
+        # 2. Khôi phục hoặc khởi tạo từ ADMIN_INITIAL_PASSWORD nếu có
+        env_pass = os.environ.get("ADMIN_INITIAL_PASSWORD") or ADMIN_INITIAL_PASSWORD
+        if env_pass and not cls.is_configured():
+            cls.setup_admin(env_pass.strip(), bypass_token=True)
+            print("[BẢO MẬT] Đã tự động khởi tạo tài khoản Quản trị viên từ cấu hình môi trường bảo mật (ADMIN_INITIAL_PASSWORD).")
+            return
+
+        # 3. Ghi nhận trạng thái bảo mật (Tuyệt đối không in giá trị token ra log)
+        if not cls.is_configured():
+            if cls.get_required_setup_token():
+                print("[BẢO MẬT] Hệ thống sẵn sàng cho quy trình thiết lập Quản trị viên lần đầu qua Web UI (đã kích hoạt Setup Token bảo vệ).")
+            elif IS_PRODUCTION or os.environ.get("RENDER") == "true":
+                print("[CẢNH BÁO BẢO MẬT] Chưa thiết lập Quản trị viên. Để kích hoạt an toàn trên Render, vui lòng đặt biến môi trường ADMIN_INITIAL_PASSWORD hoặc SETUP_TOKEN trong Render Dashboard (Environment tab). Chức năng thiết lập công khai tạm thời bị khóa để chống chiếm đoạt quyền.")
 
     @classmethod
     def get_required_setup_token(cls) -> Optional[str]:
-        """Trả về setup token bắt buộc nếu hệ thống yêu cầu mã xác minh khi thiết lập lần đầu"""
-        token = os.environ.get("SETUP_TOKEN") or SETUP_TOKEN
-        if token:
+        """
+        Trả về setup token bắt buộc từ biến môi trường bí mật.
+        Hỗ trợ cả hai định danh: SETUP_TOKEN hoặc ADMIN_SETUP_TOKEN.
+        Tuyệt đối không tạo token tạm thời in ra log.
+        """
+        token = os.environ.get("SETUP_TOKEN") or os.environ.get("ADMIN_SETUP_TOKEN") or SETUP_TOKEN
+        if token and token.strip():
             return token.strip()
-        if (IS_PRODUCTION or os.environ.get("RENDER") == "true") and cls._ephemeral_setup_token:
-            return cls._ephemeral_setup_token
         return None
+
+    @classmethod
+    def is_setup_locked(cls) -> bool:
+        """
+        Kiểm tra xem quy trình thiết lập công khai có đang bị khóa chống chiếm đoạt hay không:
+        Trên môi trường Production / Render, nếu chưa cấu hình quản trị viên và không có
+        ADMIN_INITIAL_PASSWORD, ADMIN_PASSWORD_HASH hoặc SETUP_TOKEN trong biến môi trường,
+        hệ thống sẽ KHÓA chức năng setup để người ngoài không thể chiếm đoạt.
+        """
+        if cls.is_configured():
+            return False
+
+        is_prod = IS_PRODUCTION or os.environ.get("RENDER") == "true"
+        if is_prod and not cls.get_required_setup_token() and not os.environ.get("ADMIN_INITIAL_PASSWORD") and not os.environ.get("ADMIN_PASSWORD_HASH"):
+            return True
+
+        return False
 
     @classmethod
     def is_setup_token_required(cls) -> bool:
@@ -87,7 +125,7 @@ class AdminAuthManager:
     @classmethod
     def check_rate_limit(cls, ip: str) -> Tuple[bool, int, int]:
         """
-        Kiểm tra số lần đăng nhập thất bại của IP:
+        Kiểm tra số lần đăng nhập / thiết lập thất bại của IP:
         Trả về: (is_allowed, remaining_attempts, lockout_remaining_seconds)
         """
         now = time.time()
@@ -105,7 +143,7 @@ class AdminAuthManager:
 
     @classmethod
     def record_failed_attempt(cls, ip: str):
-        """Ghi nhận lần đăng nhập thất bại"""
+        """Ghi nhận lần thử xác thực / thiết lập thất bại"""
         now = time.time()
         if ip not in cls._failed_attempts:
             cls._failed_attempts[ip] = []
@@ -113,7 +151,7 @@ class AdminAuthManager:
 
     @classmethod
     def reset_rate_limit(cls, ip: str):
-        """Xóa lịch sử thất bại khi đăng nhập thành công"""
+        """Xóa lịch sử thất bại khi xác thực thành công"""
         cls._failed_attempts.pop(ip, None)
 
     @classmethod
@@ -125,11 +163,16 @@ class AdminAuthManager:
     ) -> Tuple[bool, str]:
         """
         Thiết lập mật khẩu quản trị viên lần đầu:
-        - Kiểm tra mã bảo vệ setup token (chống khai thác trái phép trên Render công khai)
-        - Sử dụng thuật toán băm scrypt với muối ngẫu nhiên
+        - Kiểm tra khóa chống chiếm đoạt quyền (Anti-Hijacking Gate)
+        - Kiểm tra mã bảo vệ setup token bằng so sánh thời gian bất biến (Constant-Time Compare)
+        - Sử dụng thuật toán băm scrypt với muối ngẫu nhiên (Salted Password Hash)
         """
         if cls.is_configured():
-            return False, "Quản trị viên đã được thiết lập trước đó."
+            return False, "Quản trị viên đã được thiết lập trước đó. Vui lòng đăng nhập bằng mật khẩu hiện tại."
+
+        # Kiểm tra khóa chống chiếm đoạt trên môi trường công khai
+        if cls.is_setup_locked():
+            return False, "Hệ thống đang ở chế độ bảo vệ chống chiếm đoạt quyền. Vui lòng cấu hình biến môi trường ADMIN_INITIAL_PASSWORD hoặc SETUP_TOKEN trong Render Dashboard để kích hoạt."
 
         # Kiểm tra mã setup token nếu hệ thống yêu cầu
         required_token = cls.get_required_setup_token()
@@ -154,14 +197,13 @@ class AdminAuthManager:
         with open(AUTH_FILE, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, ensure_ascii=False, indent=2)
 
-        # Xóa token tạm thời nếu có
-        token_file = DATA_DIR / ".setup_token"
-        if token_file.exists():
+        # Xóa triệt để tệp token tạm thời cũ nếu còn sót lại
+        old_token = DATA_DIR / ".setup_token"
+        if old_token.exists():
             try:
-                token_file.unlink()
+                old_token.unlink()
             except Exception:
                 pass
-        cls._ephemeral_setup_token = None
 
         return True, "Thiết lập mật khẩu quản trị viên thành công."
 

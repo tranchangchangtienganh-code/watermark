@@ -120,17 +120,36 @@ def auth_status():
         "success": True,
         "is_configured": AdminAuthManager.is_configured(),
         "is_admin": session.get("is_admin", False),
-        "setup_token_required": AdminAuthManager.is_setup_token_required()
+        "setup_token_required": AdminAuthManager.is_setup_token_required(),
+        "setup_locked": AdminAuthManager.is_setup_locked()
     })
 
 @app.route("/api/auth/setup", methods=["POST"])
 def auth_setup():
-    """Thiết lập mật khẩu quản trị viên ban đầu qua quy trình an toàn có bảo vệ token"""
+    """Thiết lập mật khẩu quản trị viên ban đầu qua quy trình an toàn có bảo vệ token & rate limiting"""
+    ip = get_client_ip()
+
     if AdminAuthManager.is_configured():
         return jsonify({
             "success": False,
             "error": "Quản trị viên đã được thiết lập. Vui lòng đăng nhập bằng mật khẩu hiện tại."
         }), 400
+
+    if AdminAuthManager.is_setup_locked():
+        return jsonify({
+            "success": False,
+            "error": "Hệ thống đang ở chế độ bảo vệ chống chiếm đoạt quyền. Vui lòng cấu hình biến môi trường ADMIN_INITIAL_PASSWORD hoặc SETUP_TOKEN trong Render Dashboard (Environment tab) để kích hoạt."
+        }), 403
+
+    # Kiểm tra giới hạn tần suất nhập sai setup token (Rate Limiting)
+    is_allowed, rem, lockout_sec = AdminAuthManager.check_rate_limit(ip)
+    if not is_allowed:
+        mins = (lockout_sec + 59) // 60
+        return jsonify({
+            "success": False,
+            "error": f"Bạn đã thử thiết lập sai quá số lần cho phép. Vui lòng thử lại sau {mins} phút.",
+            "rate_limited": True
+        }), 429
 
     data = request.get_json(silent=True) or request.form
     password = data.get("password", "").strip()
@@ -145,12 +164,17 @@ def auth_setup():
 
     success, message = AdminAuthManager.setup_admin(password, setup_token=setup_token)
     if success:
+        AdminAuthManager.reset_rate_limit(ip)
         session["is_admin"] = True
+        session["admin_ip"] = ip
         session["admin_logged_in_at"] = time.time()
         session.permanent = True
         return jsonify({"success": True, "message": message, "is_admin": True})
 
-    return jsonify({"success": False, "error": message}), 400
+    # Ghi nhận lần nhập sai để khóa chống brute force token
+    AdminAuthManager.record_failed_attempt(ip)
+    status_code = 429 if "tạm thời bị khóa" in message else 400
+    return jsonify({"success": False, "error": message}), status_code
 
 @app.route("/api/auth/login", methods=["POST"])
 def auth_login():

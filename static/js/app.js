@@ -104,29 +104,45 @@ document.addEventListener("DOMContentLoaded", () => {
             // Trường hợp 1: Chưa thiết lập quản trị viên lần đầu
             authStatusBadge.className = "badge-admin-status badge-guest-active";
             authStatusBadge.querySelector(".status-dot").style.background = "#f59e0b";
-            authStatusText.textContent = "Chưa Thiết Lập Quản Trị";
-            btnOpenSetupModal.style.display = "inline-flex";
-            btnOpenLoginModal.style.display = "none";
-            btnOpenChangePassModal.style.display = "none";
-            btnLogout.style.display = "none";
 
-            const setupTokenGroup = document.getElementById("setupTokenGroup");
-            const inputSetupToken = document.getElementById("inputSetupToken");
-            if (setupTokenGroup && inputSetupToken) {
-                if (state.setup_token_required) {
-                    setupTokenGroup.style.display = "block";
-                    inputSetupToken.required = true;
-                } else {
-                    setupTokenGroup.style.display = "none";
-                    inputSetupToken.required = false;
+            if (state.setup_locked) {
+                // Khóa chống chiếm đoạt quyền trên môi trường công khai
+                authStatusText.textContent = "Khởi Tạo Đang Bị Khóa";
+                btnOpenSetupModal.style.display = "none";
+                btnOpenLoginModal.style.display = "none";
+                btnOpenChangePassModal.style.display = "none";
+                btnLogout.style.display = "none";
+
+                guestNoticeBanner.style.display = "flex";
+                guestNoticeBanner.querySelector("h4").textContent = "Quy Trình Khởi Tạo Đang Bị Khóa (Anti-Hijacking)";
+                guestNoticeBanner.querySelector("p").textContent = "Hệ thống đang chạy chế độ bảo vệ chống chiếm đoạt quyền. Chủ sở hữu vui lòng đặt biến môi trường ADMIN_INITIAL_PASSWORD hoặc SETUP_TOKEN trong Render Dashboard (Environment tab) để kích hoạt quyền quản trị an toàn.";
+                btnBannerLogin.style.display = "none";
+            } else {
+                authStatusText.textContent = "Chưa Thiết Lập Quản Trị";
+                btnOpenSetupModal.style.display = "inline-flex";
+                btnOpenLoginModal.style.display = "none";
+                btnOpenChangePassModal.style.display = "none";
+                btnLogout.style.display = "none";
+
+                const setupTokenGroup = document.getElementById("setupTokenGroup");
+                const inputSetupToken = document.getElementById("inputSetupToken");
+                if (setupTokenGroup && inputSetupToken) {
+                    if (state.setup_token_required) {
+                        setupTokenGroup.style.display = "block";
+                        inputSetupToken.required = true;
+                    } else {
+                        setupTokenGroup.style.display = "none";
+                        inputSetupToken.required = false;
+                    }
                 }
-            }
 
-            guestNoticeBanner.style.display = "flex";
-            guestNoticeBanner.querySelector("h4").textContent = "Cần Thiết Lập Mật Khẩu Quản Trị Ban Đầu";
-            guestNoticeBanner.querySelector("p").textContent = "Hệ thống chưa có mật khẩu quản trị viên. Vui lòng bấm nút bên dưới để thiết lập mật khẩu bảo mật của Ms. Trang.";
-            btnBannerLogin.textContent = "🚀 Thiết Lập Quản Trị Viên Ngay";
-            btnBannerLogin.onclick = () => { modalAdminSetup.style.display = "flex"; };
+                guestNoticeBanner.style.display = "flex";
+                guestNoticeBanner.querySelector("h4").textContent = "Cần Thiết Lập Mật Khẩu Quản Trị Ban Đầu";
+                guestNoticeBanner.querySelector("p").textContent = "Hệ thống chưa có mật khẩu quản trị viên. Vui lòng bấm nút bên dưới để thiết lập mật khẩu bảo mật của Ms. Trang.";
+                btnBannerLogin.style.display = "inline-flex";
+                btnBannerLogin.textContent = "🚀 Thiết Lập Quản Trị Viên Ngay";
+                btnBannerLogin.onclick = () => { modalAdminSetup.style.display = "flex"; };
+            }
 
             editorContentWrapper.classList.add("form-disabled");
             pipelineRoleNote.textContent = "Chưa thiết lập Quản trị viên (Khóa chế độ chỉnh sửa)";
