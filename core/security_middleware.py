@@ -14,24 +14,43 @@ from functools import wraps
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Optional, Tuple
-from flask import session, jsonify
+from flask import session, jsonify, request
 from config import ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH
 
 def admin_required(fn):
     """
-    Decorator kiểm tra quyền Quản trị viên từ Flask Session:
-    Chỉ cho phép người dùng đã xác thực quản trị mới được thực thi chỉnh sửa
+    Decorator kiểm tra quyền Quản trị viên từ Flask Session hoặc Owner Key:
+    - Cho phép nếu phiên session đang có quyền quản trị
+    - Tự động xác thực nếu yêu cầu mang mã khóa chủ sở hữu hợp lệ (X-Owner-Key, Bearer token hoặc query param)
+    - Tuyệt đối từ chối (HTTP 401) mọi yêu cầu công khai chưa xác thực
     """
     @wraps(fn)
     def decorated_view(*args, **kwargs):
-        if not session.get("is_admin"):
-            return jsonify({
-                "success": False,
-                "node": "middleware-security",
-                "error": "Yêu cầu quyền Quản trị viên để thực hiện thao tác này. Vui lòng đăng nhập.",
-                "requires_auth": True
-            }), 401
-        return fn(*args, **kwargs)
+        # 1. Kiểm tra session hiện tại
+        if session.get("is_admin"):
+            return fn(*args, **kwargs)
+
+        # 2. Kiểm tra xác thực một chạm qua Owner Key / Token
+        from core.admin_auth import AdminAuthManager
+        auth_header = request.headers.get("Authorization", "")
+        bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+        owner_key = (
+            request.headers.get("X-Owner-Key")
+            or bearer_key
+            or request.args.get("key")
+            or request.args.get("owner_key")
+        )
+        if owner_key and AdminAuthManager.validate_owner_key(owner_key):
+            session["is_admin"] = True
+            session.permanent = True
+            return fn(*args, **kwargs)
+
+        return jsonify({
+            "success": False,
+            "node": "middleware-security",
+            "error": "Yêu cầu quyền Quản trị viên để thực hiện thao tác này. Vui lòng xác thực quyền chủ sở hữu.",
+            "requires_auth": True
+        }), 401
     return decorated_view
 
 @dataclass

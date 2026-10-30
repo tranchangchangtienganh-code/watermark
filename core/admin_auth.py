@@ -1,16 +1,13 @@
 """
 Hệ thống Xác thực Quản Trị Viên (Admin Authentication System)
-Chịu trách nhiệm:
-1. Quản lý thiết lập mật khẩu lần đầu (Secure Initial Setup & Anti-Hijacking Protection)
-2. Tự động cấp và khôi phục quyền quản trị từ biến môi trường ADMIN_INITIAL_PASSWORD / ADMIN_PASSWORD_HASH (Persistent across Render Free restarts)
-3. Bảo vệ quy trình thiết lập bằng ADMIN_SETUP_TOKEN hoặc SETUP_TOKEN trên môi trường sản xuất công khai
-4. Khóa chống chiếm đoạt (Anti-Hijacking Gate): Từ chối thiết lập khi chưa cấu hình token trên đám mây
-5. Tuyệt đối không in (Zero-Leak) token, mật khẩu hay mã băm ra log máy chủ
-6. Xử lý chuẩn hóa an toàn khoảng trắng, dấu ngoặc kép/đơn ("..." hoặc '...') và Windows CRLF
-7. Hỗ trợ xác thực đa biến token (không bị xung đột giữa ADMIN_SETUP_TOKEN và SETUP_TOKEN)
-8. Mã hóa và lưu trữ mật khẩu an toàn (Scrypt / Salted Password Hash)
-9. Giới hạn tần suất đăng nhập và thử mã thiết lập (Rate Limiting chống Brute-Force)
-10. Xác thực và đổi mật khẩu quản trị viên
+Tối ưu hóa cho Người Dùng Duy Nhất (Single-Owner Mode - Ms. Trần Thị Thu Trang):
+1. Loại bỏ hoàn toàn màn hình/popup Setup Token gây phiền toái cho chủ sở hữu
+2. Hỗ trợ xác thực một chạm qua Owner Key / Private Access Link (?key=...)
+3. Duy trì phiên đăng nhập vĩnh viễn (365 ngày), loại bỏ yêu cầu đăng nhập lặp đi lặp lại
+4. Bảo vệ an toàn tuyệt đối các API quản trị (chặn mọi truy cập công khai chưa xác thực)
+5. Hỗ trợ xác thực đa nguồn: Session Cookie dài hạn, Header X-Owner-Key, Bearer Token
+6. Mã hóa và lưu trữ mật khẩu an toàn (Scrypt / Salted Password Hash)
+7. Tự động cấp và duy trì quyền qua các lần Render Free ngủ đông / khởi động lại
 """
 import os
 import json
@@ -19,7 +16,7 @@ import secrets
 from typing import Tuple, Dict, List, Optional
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
-from config import DATA_DIR, ADMIN_INITIAL_PASSWORD, SETUP_TOKEN, IS_PRODUCTION
+from config import DATA_DIR, ADMIN_INITIAL_PASSWORD, SETUP_TOKEN, IS_PRODUCTION, OWNER_KEY, SINGLE_OWNER_MODE
 
 AUTH_FILE = DATA_DIR / "admin_auth.json"
 MAX_FAILED_ATTEMPTS = 5
@@ -46,26 +43,93 @@ class AdminAuthManager:
         return val
 
     @classmethod
+    def _get_or_create_owner_key(cls) -> str:
+        """
+        Lấy hoặc sinh mã khóa truy cập chủ sở hữu cố định cho hệ thống:
+        - Ưu tiên đọc từ biến môi trường OWNER_KEY, ADMIN_SETUP_TOKEN hoặc ADMIN_INITIAL_PASSWORD
+        - Nếu chưa có, duy trì khóa cố định trong tệp .owner_key
+        """
+        for env_var in ["OWNER_KEY", "ADMIN_ACCESS_KEY", "ADMIN_SETUP_TOKEN", "SETUP_TOKEN", "ADMIN_INITIAL_PASSWORD"]:
+            val = os.environ.get(env_var)
+            if val:
+                s = cls._sanitize_token(val)
+                if s:
+                    return s
+
+        key_file = DATA_DIR / ".owner_key"
+        if key_file.exists():
+            try:
+                k = cls._sanitize_token(key_file.read_text(encoding="utf-8"))
+                if k:
+                    return k
+            except Exception:
+                pass
+
+        # Sinh mã ngẫu nhiên 32 hex chars an toàn
+        new_key = secrets.token_hex(16)
+        try:
+            key_file.write_text(new_key, encoding="utf-8")
+        except Exception:
+            pass
+        return new_key
+
+    @classmethod
     def get_valid_setup_tokens(cls) -> List[str]:
         """
-        Lấy danh sách tất cả các setup token hợp lệ được cấu hình qua biến môi trường.
-        Hỗ trợ cả ADMIN_SETUP_TOKEN lẫn SETUP_TOKEN, tự động chuẩn hóa quotes và whitespace.
-        Đọc trực tiếp từ os.environ trong từng request để luôn phản ánh biến môi trường mới nhất.
+        Lấy danh sách tất cả các setup token / owner key hợp lệ từ biến môi trường.
+        Hỗ trợ cả OWNER_KEY, ADMIN_SETUP_TOKEN, SETUP_TOKEN và ADMIN_INITIAL_PASSWORD.
         """
         candidates: List[str] = []
-        for key in ["ADMIN_SETUP_TOKEN", "SETUP_TOKEN"]:
+        for key in ["OWNER_KEY", "ADMIN_ACCESS_KEY", "ADMIN_SETUP_TOKEN", "SETUP_TOKEN", "ADMIN_INITIAL_PASSWORD"]:
             raw = os.environ.get(key)
             if raw:
                 cleaned = cls._sanitize_token(raw)
                 if cleaned and cleaned not in candidates:
                     candidates.append(cleaned)
 
-        if SETUP_TOKEN:
-            cleaned = cls._sanitize_token(SETUP_TOKEN)
-            if cleaned and cleaned not in candidates:
-                candidates.append(cleaned)
-
         return candidates
+
+    @classmethod
+    def validate_owner_key(cls, candidate: str) -> bool:
+        """
+        Xác thực mã truy cập chủ sở hữu (Owner Key / Setup Token / Password).
+        Sử dụng so sánh thời gian bất biến (constant-time) chống timing attacks.
+        """
+        if not candidate:
+            return False
+
+        cleaned = cls._sanitize_token(candidate)
+        if not cleaned:
+            return False
+
+        # 1. So khớp với các biến môi trường được cấu hình
+        valid_keys = cls.get_valid_setup_tokens()
+        for vk in valid_keys:
+            if secrets.compare_digest(cleaned, vk):
+                return True
+
+        # 2. So khớp với khóa chủ sở hữu lưu cục bộ (.owner_key)
+        key_file = DATA_DIR / ".owner_key"
+        if key_file.exists():
+            try:
+                k = cls._sanitize_token(key_file.read_text(encoding="utf-8"))
+                if k and secrets.compare_digest(cleaned, k):
+                    return True
+            except Exception:
+                pass
+
+        # 3. So khớp với mật khẩu băm đã lưu trong AUTH_FILE
+        if AUTH_FILE.exists():
+            try:
+                with open(AUTH_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                stored_hash = data.get("password_hash")
+                if stored_hash and check_password_hash(stored_hash, cleaned):
+                    return True
+            except Exception:
+                pass
+
+        return False
 
     @classmethod
     def init_app(cls):
@@ -73,11 +137,10 @@ class AdminAuthManager:
         Khởi tạo và đồng bộ quyền Quản trị viên khi ứng dụng khởi động.
         Đảm bảo tính bền vững (Persistence) qua các lần khởi động lại của Render Free:
         - Khôi phục từ ADMIN_PASSWORD_HASH nếu có
-        - Hoặc tự động khởi tạo từ ADMIN_INITIAL_PASSWORD nếu có
-        - Hủy bỏ và vô hiệu hóa vĩnh viễn các token cũ bị lộ
-        - Tuyệt đối không in bất kỳ token hay mật khẩu nào ra log console
+        - Hoặc tự động khởi tạo từ ADMIN_INITIAL_PASSWORD / OWNER_KEY
+        - Tự động kích hoạt chế độ Single-Owner để loại bỏ hoàn toàn popup Setup Token
         """
-        # Hủy bỏ và xóa triệt để mọi tệp token tạm thời cũ nếu còn tồn tại
+        # Hủy bỏ tệp token tạm thời cũ nếu còn tồn tại
         old_token_file = DATA_DIR / ".setup_token"
         if old_token_file.exists():
             try:
@@ -85,7 +148,7 @@ class AdminAuthManager:
             except Exception:
                 pass
 
-        # 1. Khôi phục trực tiếp từ mã băm môi trường ADMIN_PASSWORD_HASH (Duy trì bền vững trên Render Free)
+        # 1. Khôi phục trực tiếp từ mã băm môi trường ADMIN_PASSWORD_HASH
         env_hash = cls._sanitize_token(os.environ.get("ADMIN_PASSWORD_HASH"))
         if env_hash and not cls.is_configured():
             now = time.time()
@@ -101,36 +164,39 @@ class AdminAuthManager:
             print("[BẢO MẬT] Đã đồng bộ tài khoản Quản trị viên từ cấu hình môi trường bảo mật (ADMIN_PASSWORD_HASH).")
             return
 
-        # 2. Khôi phục hoặc khởi tạo từ ADMIN_INITIAL_PASSWORD nếu có
-        env_pass = cls._sanitize_token(os.environ.get("ADMIN_INITIAL_PASSWORD") or ADMIN_INITIAL_PASSWORD)
+        # 2. Khôi phục hoặc khởi tạo từ ADMIN_INITIAL_PASSWORD hoặc OWNER_KEY hoặc ADMIN_SETUP_TOKEN
+        env_pass = (
+            cls._sanitize_token(os.environ.get("ADMIN_INITIAL_PASSWORD"))
+            or cls._sanitize_token(os.environ.get("OWNER_KEY"))
+            or cls._sanitize_token(os.environ.get("ADMIN_ACCESS_KEY"))
+            or cls._sanitize_token(os.environ.get("ADMIN_SETUP_TOKEN"))
+            or cls._sanitize_token(os.environ.get("SETUP_TOKEN"))
+            or ADMIN_INITIAL_PASSWORD
+        )
         if env_pass and not cls.is_configured():
             cls.setup_admin(env_pass, bypass_token=True)
-            print("[BẢO MẬT] Đã tự động khởi tạo tài khoản Quản trị viên từ cấu hình môi trường bảo mật (ADMIN_INITIAL_PASSWORD).")
+            print("[BẢO MẬT] Đã tự động cấu hình quyền chủ sở hữu từ biến môi trường.")
             return
 
-        # 3. Ghi nhận trạng thái bảo mật (Tuyệt đối không in giá trị token ra log)
-        if not cls.is_configured():
-            if cls.get_valid_setup_tokens():
-                print("[BẢO MẬT] Hệ thống sẵn sàng cho quy trình thiết lập Quản trị viên lần đầu qua Web UI (đã kích hoạt Setup Token bảo vệ).")
-            elif IS_PRODUCTION or os.environ.get("RENDER") == "true":
-                print("[CẢNH BÁO BẢO MẬT] Chưa thiết lập Quản trị viên. Để kích hoạt an toàn trên Render, vui lòng đặt biến môi trường ADMIN_SETUP_TOKEN hoặc ADMIN_INITIAL_PASSWORD trong Render Dashboard (Environment tab). Chức năng thiết lập công khai tạm thời bị khóa để chống chiếm đoạt quyền.")
+        # 3. Chế độ Single-Owner tự động kích hoạt tài khoản ban đầu
+        # Loại bỏ hoàn toàn màn hình Setup Token popup gây phiền toái cho Ms. Trang
+        if not cls.is_configured() and SINGLE_OWNER_MODE:
+            default_key = cls._get_or_create_owner_key()
+            cls.setup_admin(default_key, bypass_token=True)
+            print("[BẢO MẬT] Chế độ Single-Owner: Đã tự động kích hoạt tài khoản chủ sở hữu an toàn (Zero-Popup Setup).")
 
     @classmethod
     def get_required_setup_token(cls) -> Optional[str]:
-        """
-        Trả về setup token ưu tiên hàng đầu từ biến môi trường bí mật.
-        Hỗ trợ cả ADMIN_SETUP_TOKEN lẫn SETUP_TOKEN.
-        """
+        """Trả về setup token ưu tiên hàng đầu nếu có"""
         tokens = cls.get_valid_setup_tokens()
         return tokens[0] if tokens else None
 
     @classmethod
     def is_setup_locked(cls) -> bool:
         """
-        Kiểm tra xem quy trình thiết lập công khai có đang bị khóa chống chiếm đoạt hay không:
-        Trên môi trường Production / Render, nếu chưa cấu hình quản trị viên và không có
-        ADMIN_INITIAL_PASSWORD, ADMIN_PASSWORD_HASH, ADMIN_SETUP_TOKEN hoặc SETUP_TOKEN trong biến môi trường,
-        hệ thống sẽ KHÓA chức năng setup để người ngoài không thể chiếm đoạt.
+        Kiểm tra xem quy trình thiết lập có bị khóa hay không:
+        Nếu trên môi trường sản xuất công khai mà chưa có mật khẩu hoặc token bí mật,
+        hệ thống kích hoạt khóa chống chiếm đoạt quyền (Anti-Hijacking).
         """
         if cls.is_configured():
             return False
@@ -148,7 +214,9 @@ class AdminAuthManager:
 
     @classmethod
     def is_setup_token_required(cls) -> bool:
-        """Kiểm tra xem hệ thống có yêu cầu mã token khi thiết lập lần đầu không"""
+        """Trong Single-Owner Mode, không bắt buộc người dùng nhập token popup"""
+        if SINGLE_OWNER_MODE:
+            return False
         return bool(cls.get_valid_setup_tokens())
 
     @classmethod
@@ -184,7 +252,7 @@ class AdminAuthManager:
 
     @classmethod
     def record_failed_attempt(cls, ip: str):
-        """Ghi nhận lần thử xác thực / thiết lập thất bại"""
+        """Ghi nhận lần thử xác thực thất bại"""
         now = time.time()
         if ip not in cls._failed_attempts:
             cls._failed_attempts[ip] = []
@@ -204,26 +272,21 @@ class AdminAuthManager:
     ) -> Tuple[bool, str]:
         """
         Thiết lập mật khẩu quản trị viên lần đầu:
-        - Kiểm tra khóa chống chiếm đoạt quyền (Anti-Hijacking Gate)
-        - So sánh thời gian bất biến (Constant-Time Compare) với TẤT CẢ các token hợp lệ được cấu hình
-        - Tự động chuẩn hóa loại bỏ khoảng trắng và dấu ngoặc kép bao quanh
         - Sử dụng thuật toán băm scrypt với muối ngẫu nhiên (Salted Password Hash)
         """
         if cls.is_configured():
             return False, "Quản trị viên đã được thiết lập trước đó. Vui lòng đăng nhập bằng mật khẩu hiện tại."
 
-        # Kiểm tra khóa chống chiếm đoạt trên môi trường công khai
-        if cls.is_setup_locked():
+        # Kiểm tra khóa chống chiếm đoạt trên môi trường công khai nếu không bypass
+        if not bypass_token and cls.is_setup_locked():
             return False, "Hệ thống đang ở chế độ bảo vệ chống chiếm đoạt quyền. Vui lòng cấu hình biến môi trường ADMIN_SETUP_TOKEN hoặc ADMIN_INITIAL_PASSWORD trong Render Dashboard để kích hoạt."
 
-        # Kiểm tra mã setup token nếu hệ thống yêu cầu
         valid_tokens = cls.get_valid_setup_tokens()
         if valid_tokens and not bypass_token:
             cleaned_input = cls._sanitize_token(setup_token)
             if not cleaned_input:
                 return False, "Vui lòng nhập mã kích hoạt thiết lập (Setup Token)."
 
-            # So sánh an toàn thời gian bất biến (constant-time) với tất cả token hợp lệ
             matched = any(secrets.compare_digest(cleaned_input, t) for t in valid_tokens)
             if not matched:
                 return False, "Mã kích hoạt thiết lập (Setup Token) không chính xác hoặc chưa được cung cấp."
@@ -232,7 +295,6 @@ class AdminAuthManager:
         if not cleaned_password or len(cleaned_password) < 6:
             return False, "Mật khẩu quản trị viên phải có ít nhất 6 ký tự."
 
-        # Băm mật khẩu bằng thuật toán scrypt chuẩn Werkzeug
         hashed = generate_password_hash(cleaned_password)
         now = time.time()
         auth_data = {
@@ -246,26 +308,24 @@ class AdminAuthManager:
         with open(AUTH_FILE, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, ensure_ascii=False, indent=2)
 
-        # Xóa triệt để tệp token tạm thời cũ nếu còn sót lại
-        old_token = DATA_DIR / ".setup_token"
-        if old_token.exists():
-            try:
-                old_token.unlink()
-            except Exception:
-                pass
-
         return True, "Thiết lập mật khẩu quản trị viên thành công."
 
     @classmethod
     def authenticate(cls, password: str, ip: str) -> Tuple[bool, str]:
         """
-        Xác thực đăng nhập quản trị viên với Rate Limiting:
+        Xác thực đăng nhập quản trị viên / chủ sở hữu với Rate Limiting:
+        Chấp nhận cả Mật khẩu Quản trị hoặc Mã khóa Chủ sở hữu (Owner Key)
         Trả về (success, message)
         """
         is_allowed, remaining, lockout_sec = cls.check_rate_limit(ip)
         if not is_allowed:
             mins = (lockout_sec + 59) // 60
             return False, f"Bạn đã nhập sai quá số lần cho phép. Vui lòng thử lại sau {mins} phút."
+
+        # 1. Kiểm tra khớp Owner Key / Token trước
+        if cls.validate_owner_key(password):
+            cls.reset_rate_limit(ip)
+            return True, "Xác thực quyền Chủ sở hữu (Ms. Trang) thành công."
 
         if not cls.is_configured():
             return False, "Hệ thống chưa được thiết lập tài khoản quản trị viên ban đầu."
@@ -291,12 +351,12 @@ class AdminAuthManager:
         cls.record_failed_attempt(ip)
         _, rem, _ = cls.check_rate_limit(ip)
         if rem == 0:
-            return False, "Mật khẩu không chính xác. Tài khoản tạm thời bị khóa 15 phút do nhập sai 5 lần."
-        return False, f"Mật khẩu không chính xác. Bạn còn {rem} lần thử trước khi bị tạm khóa."
+            return False, "Mã khóa hoặc mật khẩu không chính xác. Tài khoản tạm thời bị khóa 15 phút do nhập sai 5 lần."
+        return False, f"Mã khóa hoặc mật khẩu không chính xác. Bạn còn {rem} lần thử trước khi bị tạm khóa."
 
     @classmethod
     def change_password(cls, current_password: str, new_password: str) -> Tuple[bool, str]:
-        """Đổi mật khẩu quản trị viên (yêu cầu mật khẩu hiện tại)"""
+        """Đổi mật khẩu quản trị viên (yêu cầu mật khẩu hoặc Owner Key hiện tại)"""
         if not cls.is_configured():
             return False, "Hệ thống chưa được cấu hình quản trị viên."
 
@@ -310,10 +370,14 @@ class AdminAuthManager:
         except Exception:
             return False, "Lỗi đọc dữ liệu xác thực."
 
-        if not check_password_hash(stored_hash, current_password):
+        # Cho phép đổi mật khẩu nếu nhập đúng mật khẩu cũ HOẶC đúng Owner Key
+        is_owner_key_valid = cls.validate_owner_key(current_password)
+        is_password_valid = check_password_hash(stored_hash, current_password) if stored_hash else False
+
+        if not is_owner_key_valid and not is_password_valid:
             return False, "Mật khẩu hiện tại không chính xác."
 
-        if check_password_hash(stored_hash, new_password):
+        if is_password_valid and check_password_hash(stored_hash, new_password):
             return False, "Mật khẩu mới không được trùng với mật khẩu hiện tại."
 
         data["password_hash"] = generate_password_hash(new_password.strip())

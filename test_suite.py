@@ -451,12 +451,16 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
         old_admin_token = os.environ.get("ADMIN_SETUP_TOKEN")
         old_pass = os.environ.get("ADMIN_INITIAL_PASSWORD")
         old_hash = os.environ.get("ADMIN_PASSWORD_HASH")
+        old_owner_key = os.environ.get("OWNER_KEY")
+        old_access_key = os.environ.get("ADMIN_ACCESS_KEY")
 
         os.environ["RENDER"] = "true"
         os.environ.pop("SETUP_TOKEN", None)
         os.environ.pop("ADMIN_SETUP_TOKEN", None)
         os.environ.pop("ADMIN_INITIAL_PASSWORD", None)
         os.environ.pop("ADMIN_PASSWORD_HASH", None)
+        os.environ.pop("OWNER_KEY", None)
+        os.environ.pop("ADMIN_ACCESS_KEY", None)
 
         try:
             self.assertTrue(AdminAuthManager.is_setup_locked(), "is_setup_locked phải là True khi chạy trên Render mà thiếu biến môi trường bí mật")
@@ -484,6 +488,10 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
                 os.environ["ADMIN_INITIAL_PASSWORD"] = old_pass
             if old_hash is not None:
                 os.environ["ADMIN_PASSWORD_HASH"] = old_hash
+            if old_owner_key is not None:
+                os.environ["OWNER_KEY"] = old_owner_key
+            if old_access_key is not None:
+                os.environ["ADMIN_ACCESS_KEY"] = old_access_key
 
             if backup_auth:
                 AUTH_FILE.write_text(backup_auth, encoding="utf-8")
@@ -748,6 +756,87 @@ class ComprehensiveSecurityTestSuite(unittest.TestCase):
         self.assertIn("/api/*", redirects_text)
         self.assertIn("https://watermark-nuwt.onrender.com/api/:splat", redirects_text)
         self.assertIn("200!", redirects_text)
+
+    # ==========================================================
+    # TIÊU CHÍ CHẾ ĐỘ CHỦ SỞ HỮU DUY NHẤT (Single-Owner Mode - Ms. Trang)
+    # ==========================================================
+    def test_23_single_owner_zero_popup_setup_status(self):
+        """Kiểm thử: Trong Single-Owner Mode, hệ thống đã cấu hình và không bắt buộc popup Setup Token"""
+        with self.client as client:
+            res = client.get("/api/auth/status")
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data.get("is_configured"), "Single-Owner Mode phải luôn sẵn sàng (is_configured = True)")
+            self.assertFalse(data.get("setup_token_required"), "setup_token_required phải là False (loại bỏ popup)")
+            self.assertFalse(data.get("setup_locked"), "setup_locked phải là False")
+
+    def test_24_owner_key_authentication_direct(self):
+        """Kiểm thử xác thực trực tiếp qua Owner Key tại /api/auth/owner-auth"""
+        test_key = "MsTrangOwnerSecretKey2026"
+        os.environ["OWNER_KEY"] = test_key
+        try:
+            with self.client as client:
+                # 1. Sai owner key -> Phải trả về 401
+                res_wrong = client.post("/api/auth/owner-auth", json={"key": "WrongKey123"})
+                self.assertEqual(res_wrong.status_code, 401)
+                self.assertFalse(res_wrong.get_json()["success"])
+
+                # 2. Đúng owner key -> Trả về 200 và cấp quyền admin
+                res_ok = client.post("/api/auth/owner-auth", json={"key": test_key})
+                self.assertEqual(res_ok.status_code, 200)
+                self.assertTrue(res_ok.get_json()["is_admin"])
+
+                # 3. Kiểm tra session sau khi xác thực
+                res_status = client.get("/api/auth/status")
+                self.assertTrue(res_status.get_json()["is_admin"], "Session phải lưu trạng thái is_admin = True")
+        finally:
+            os.environ.pop("OWNER_KEY", None)
+
+    def test_25_owner_key_header_unlocks_protected_api(self):
+        """Kiểm thử Header X-Owner-Key mở khóa API được bảo vệ (/api/process) mà không cần session trước"""
+        test_key = "MsTrangHeaderKey2026"
+        os.environ["OWNER_KEY"] = test_key
+        try:
+            # Tạo client hoàn toàn mới không có session cookie
+            fresh_client = app.test_client()
+
+            # 1. Yêu cầu không có session và không có header -> Phải bị từ chối 401
+            res_denied = fresh_client.post("/api/process")
+            self.assertEqual(res_denied.status_code, 401, "Không có quyền hoặc key phải trả về 401")
+            self.assertTrue(res_denied.get_json().get("requires_auth"))
+
+            # 2. Yêu cầu mang header X-Owner-Key hợp lệ -> Vượt qua xác thực middleware (không bị 401)
+            # Dù thiếu file tải lên, mã lỗi phải là từ chối nghiệp vụ (400 hoặc 500) chứ KHÔNG PHẢI 401 Unauthorized
+            res_allowed = fresh_client.post(
+                "/api/process",
+                headers={"X-Owner-Key": test_key}
+            )
+            self.assertNotEqual(res_allowed.status_code, 401, "Header X-Owner-Key hợp lệ phải mở khóa middleware")
+        finally:
+            os.environ.pop("OWNER_KEY", None)
+
+    def test_26_permanent_session_lifetime_one_year(self):
+        """Kiểm thử cấu hình phiên làm việc vĩnh viễn 365 ngày (1 năm) cho chủ sở hữu"""
+        lifetime = app.config.get("PERMANENT_SESSION_LIFETIME")
+        self.assertEqual(lifetime, 31536000, "PERMANENT_SESSION_LIFETIME phải là 31,536,000 giây (365 ngày)")
+
+    def test_27_private_access_link_query_param(self):
+        """Kiểm thử liên kết truy cập riêng tư (?key=...) tự động cấp quyền Quản trị viên"""
+        test_key = "MsTrangBookmarkUrlKey2026"
+        os.environ["OWNER_KEY"] = test_key
+        try:
+            fresh_client = app.test_client()
+
+            # 1. Gọi /api/auth/status kèm query param ?key=...
+            res = fresh_client.get(f"/api/auth/status?key={test_key}")
+            self.assertEqual(res.status_code, 200)
+            self.assertTrue(res.get_json()["is_admin"], "Truy cập kèm ?key hợp lệ phải tự động kích hoạt is_admin")
+
+            # 2. Yêu cầu tiếp theo trong cùng phiên không cần kèm param vẫn giữ quyền admin (365 ngày)
+            res_subsequent = fresh_client.get("/api/auth/status")
+            self.assertTrue(res_subsequent.get_json()["is_admin"], "Phiên session dài hạn phải duy trì quyền admin")
+        finally:
+            os.environ.pop("OWNER_KEY", None)
 
 if __name__ == "__main__":
     unittest.main()

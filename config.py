@@ -40,8 +40,17 @@ ALLOWED_EXTENSIONS = {
     "webp": ["image/webp"]
 }
 
-# Thời gian hết hạn của phiên làm việc (giây) - Mặc định 2 giờ
-SESSION_LIFETIME_SECONDS = int(os.environ.get("SESSION_LIFETIME_SECONDS", 7200))
+# Thời gian hết hạn của phiên làm việc (giây) - Mặc định lưu trữ phiên 365 ngày cho chủ sở hữu duy nhất
+SESSION_LIFETIME_SECONDS = int(os.environ.get("SESSION_LIFETIME_SECONDS", 31536000))
+PERMANENT_SESSION_LIFETIME = int(os.environ.get("PERMANENT_SESSION_LIFETIME", 31536000))
+
+# Chế độ Chủ sở hữu duy nhất (Single-Owner Mode - Dành riêng cho Ms. Trang)
+SINGLE_OWNER_MODE = os.environ.get("SINGLE_OWNER_MODE", "true").lower() == "true"
+OWNER_KEY = os.environ.get("OWNER_KEY") or os.environ.get("ADMIN_ACCESS_KEY")
+
+# Cấu hình bảo vệ trang web riêng tư qua HTTP Basic Auth (Tùy chọn)
+BASIC_AUTH_USERNAME = os.environ.get("BASIC_AUTH_USERNAME")
+BASIC_AUTH_PASSWORD = os.environ.get("BASIC_AUTH_PASSWORD")
 
 # Cấu hình mặc định cho Watermark Ms. Trang
 DEFAULT_WATERMARK_TEXT = os.environ.get("DEFAULT_WATERMARK_TEXT", "TRẦN THỊ THU TRANG")

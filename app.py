@@ -26,7 +26,8 @@ from flask import Flask, request, jsonify, render_template, send_file, abort, se
 from config import (
     SECRET_KEY, HOST, PORT, MAX_CONTENT_LENGTH,
     DEFAULT_WATERMARK_TEXT, DEFAULT_SUB_TEXT, DEFAULT_GRAY_COLOR_HEX,
-    IS_PRODUCTION
+    IS_PRODUCTION, PERMANENT_SESSION_LIFETIME,
+    BASIC_AUTH_USERNAME, BASIC_AUTH_PASSWORD, SINGLE_OWNER_MODE
 )
 from core import SecurityMiddleware, WatermarkController, SessionStorage, AdminAuthManager, admin_required
 
@@ -42,7 +43,7 @@ app.config["SECRET_KEY"] = SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["PERMANENT_SESSION_LIFETIME"] = 7200  # 2 giờ
+app.config["PERMANENT_SESSION_LIFETIME"] = PERMANENT_SESSION_LIFETIME  # 365 ngày cho chủ sở hữu
 
 # Kích hoạt Secure Cookie khi chạy trên môi trường đám mây có HTTPS
 if IS_PRODUCTION:
@@ -58,6 +59,28 @@ AdminAuthManager.init_app()
 def get_client_ip() -> str:
     """Lấy địa chỉ IP thực tế của máy khách (đã qua ProxyFix an toàn)"""
     return request.remote_addr or "127.0.0.1"
+
+# ==========================================================
+# CƠ CHẾ BẢO VỆ RIÊNG TƯ QUA HTTP BASIC AUTH (Tùy chọn)
+# ==========================================================
+@app.before_request
+def check_private_site_access():
+    """Bảo vệ trang web riêng tư qua HTTP Basic Auth nếu được cấu hình trên máy chủ"""
+    if BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD:
+        if request.method == "OPTIONS":
+            return
+        auth = request.authorization
+        if auth and auth.username == BASIC_AUTH_USERNAME and auth.password == BASIC_AUTH_PASSWORD:
+            return
+        # Cho phép nếu đã có phiên admin hoặc mang X-Owner-Key hợp lệ
+        if session.get("is_admin"):
+            return
+        key = request.headers.get("X-Owner-Key") or request.args.get("key")
+        if key and AdminAuthManager.validate_owner_key(key):
+            return
+        return ("Trang web riêng tư của Ms. Trang. Vui lòng nhập thông tin xác thực.", 401, {
+            "WWW-Authenticate": 'Basic realm="Private Watermark System"'
+        })
 
 # ==========================================================
 # CƠ CHẾ BẢO VỆ CSRF (Cross-Site Request Forgery Protection)
@@ -92,7 +115,7 @@ def add_cors_and_security_headers(response):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Authorization, X-Requested-With"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Authorization, X-Requested-With, X-Owner-Key"
         response.headers["Vary"] = "Origin, Cookie"
     return response
 
@@ -104,7 +127,7 @@ def handle_options(subpath):
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CSRF-Token, Authorization, X-Requested-With, X-Owner-Key"
     return response, 200
 
 @app.context_processor
@@ -129,6 +152,12 @@ def request_entity_too_large(error):
 @app.route("/")
 def index():
     """Giao diện chính: Tự động thích ứng chế độ Khách (Read-Only) hoặc Quản trị viên (Full Edit)"""
+    # Nếu có ?key=... hoặc ?owner_key=... trên URL khi truy cập trực tiếp Flask, kiểm tra và cấp quyền luôn
+    key_param = request.args.get("key") or request.args.get("owner_key")
+    if key_param and AdminAuthManager.validate_owner_key(key_param):
+        session["is_admin"] = True
+        session.permanent = True
+
     is_admin = session.get("is_admin", False)
     is_configured = AdminAuthManager.is_configured()
     return render_template("index.html", is_admin=is_admin, is_configured=is_configured)
@@ -141,6 +170,20 @@ def auth_status():
     """Trả về trạng thái cấu hình và phiên đăng nhập hiện tại kèm CSRF token đồng bộ cho Netlify/SPA"""
     if "csrf_token" not in session:
         session["csrf_token"] = secrets.token_hex(32)
+
+    # Tự động nhận diện Owner Key từ header hoặc tham số truy vấn
+    auth_header = request.headers.get("Authorization", "")
+    bearer_key = auth_header.replace("Bearer ", "").strip() if auth_header.startswith("Bearer ") else ""
+    owner_key = (
+        request.headers.get("X-Owner-Key")
+        or bearer_key
+        or request.args.get("key")
+        or request.args.get("owner_key")
+    )
+    if owner_key and AdminAuthManager.validate_owner_key(owner_key):
+        session["is_admin"] = True
+        session.permanent = True
+
     return jsonify({
         "success": True,
         "is_configured": AdminAuthManager.is_configured(),
@@ -159,6 +202,40 @@ def get_csrf_token_endpoint():
         "success": True,
         "csrf_token": session.get("csrf_token")
     })
+
+@app.route("/api/auth/owner-auth", methods=["POST"])
+def auth_owner_direct():
+    """Xác thực một chạm bằng Owner Key hoặc Token từ thiết bị chủ sở hữu (Ms. Trang)"""
+    ip = get_client_ip()
+    data = request.get_json(silent=True) or request.form or {}
+    key = (data.get("key") if isinstance(data, dict) else None) or request.headers.get("X-Owner-Key", "")
+
+    if not key:
+        return jsonify({"success": False, "error": "Vui lòng cung cấp mã khóa chủ sở hữu."}), 400
+
+    is_allowed, rem, lockout_sec = AdminAuthManager.check_rate_limit(ip)
+    if not is_allowed:
+        mins = (lockout_sec + 59) // 60
+        return jsonify({
+            "success": False,
+            "error": f"Tài khoản bị tạm khóa do nhập sai quá nhiều lần. Vui lòng thử lại sau {mins} phút.",
+            "rate_limited": True
+        }), 429
+
+    if AdminAuthManager.validate_owner_key(key):
+        AdminAuthManager.reset_rate_limit(ip)
+        session["is_admin"] = True
+        session["admin_ip"] = ip
+        session["admin_logged_in_at"] = time.time()
+        session.permanent = True
+        return jsonify({
+            "success": True,
+            "message": "Xác thực thiết bị chủ sở hữu thành công (Ms. Trang).",
+            "is_admin": True
+        })
+
+    AdminAuthManager.record_failed_attempt(ip)
+    return jsonify({"success": False, "error": "Mã khóa chủ sở hữu không hợp lệ."}), 401
 
 @app.route("/api/auth/setup", methods=["POST"])
 def auth_setup():
@@ -239,7 +316,7 @@ def auth_login():
         session.permanent = True
         return jsonify({"success": True, "message": message, "is_admin": True})
 
-    status_code = 429 if "tạm thời bị khóa" in message else 401
+    status_code = 429 if "tạm thời bị khóa" in message.lower() else 401
     return jsonify({"success": False, "error": message}), status_code
 
 @app.route("/api/auth/logout", methods=["POST"])
