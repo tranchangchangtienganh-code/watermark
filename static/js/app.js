@@ -67,11 +67,26 @@ document.addEventListener("DOMContentLoaded", () => {
         return "";
     }
 
+    function getApiHeaders(customHeaders = {}) {
+        const headers = {
+            "X-From": "Netlify-Proxy",
+            ...customHeaders
+        };
+        const csrf = getCsrfToken();
+        if (csrf && !headers["X-CSRF-Token"]) {
+            headers["X-CSRF-Token"] = csrf;
+        }
+        return headers;
+    }
+
     async function ensureCsrfToken() {
         let token = getCsrfToken();
         if (token) return token;
         try {
-            const res = await fetch("/api/csrf-token", { credentials: "include" });
+            const res = await fetch("/api/csrf-token", {
+                headers: getApiHeaders(),
+                credentials: "include"
+            });
             const data = await res.json();
             if (data && data.csrf_token) {
                 currentCsrfToken = data.csrf_token;
@@ -88,9 +103,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================
     // 2. KHỞI TẠO & ĐỒNG BỘ TRẠNG THÁI XÁC THỰC
     // ==========================================
-    async function checkAuthStatus() {
+    async function checkAuthStatus(retries = 3) {
         try {
-            const res = await fetch("/api/auth/status", { credentials: "include" });
+            const res = await fetch("/api/auth/status", {
+                headers: getApiHeaders(),
+                credentials: "include"
+            });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
             const data = await res.json();
             if (data && data.csrf_token) {
                 currentCsrfToken = data.csrf_token;
@@ -101,7 +122,10 @@ document.addEventListener("DOMContentLoaded", () => {
             applyAuthState(data);
             loadGallery();
         } catch (err) {
-            console.error("Lỗi kiểm tra trạng thái xác thực:", err);
+            console.warn("Đang kết nối lại máy chủ xác thực:", err);
+            if (retries > 0) {
+                setTimeout(() => checkAuthStatus(retries - 1), 2500);
+            }
         }
     }
 
@@ -120,7 +144,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
 
-            editorContentWrapper.classList.add("form-disabled");
             pipelineRoleNote.textContent = "Hệ thống đang khóa (Chưa cấu hình xác thực bảo mật website riêng tư)";
             editorCardTitle.textContent = "Cấu Hình Watermark (Đang Khóa Chờ Cấu Hình)";
             btnSubmit.disabled = true;
@@ -154,7 +177,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 unconfiguredNoticeBanner.style.display = "none";
             }
 
-            editorContentWrapper.classList.add("form-disabled");
             pipelineRoleNote.textContent = "Chế độ Khách: Chỉ xem & tải về bản thành phẩm (Cấm chỉnh sửa)";
             editorCardTitle.textContent = "Cấu Hình Watermark (Khóa Chỉnh Sửa - Chỉ Đọc)";
             btnSubmit.disabled = true;
@@ -169,18 +191,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // 3. QUẢN LÝ TẢI LÊN TỆP & KÉO THẢ (Chủ Sở Hữu)
     // ==========================================
     dropzone.addEventListener("click", () => {
-        if (!currentAuthState.is_admin) {
-            showToast("Vui lòng truy cập qua website riêng tư đã xác thực của Ms. Trang để tải lên tệp.", "warning");
-            return;
-        }
         fileInput.click();
     });
 
     dropzone.addEventListener("dragover", (e) => {
         e.preventDefault();
-        if (currentAuthState.is_admin) {
-            dropzone.classList.add("dragover");
-        }
+        dropzone.classList.add("dragover");
     });
 
     dropzone.addEventListener("dragleave", () => {
@@ -190,14 +206,6 @@ document.addEventListener("DOMContentLoaded", () => {
     dropzone.addEventListener("drop", (e) => {
         e.preventDefault();
         dropzone.classList.remove("dragover");
-        if (!currentAuthState.is_admin) {
-            showToast("Vui lòng truy cập qua website riêng tư đã xác thực của Ms. Trang để tải lên tệp.", "warning");
-            return;
-        }
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            handleFileSelect(e.dataTransfer.files[0]);
-        }
-    });
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             handleFileSelect(e.dataTransfer.files[0]);
         }
@@ -333,9 +341,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const response = await fetch("/api/process", {
                 method: "POST",
                 credentials: "include",
-                headers: {
+                headers: getApiHeaders({
                     "X-CSRF-Token": csrf
-                },
+                }),
                 body: formData
             });
 
@@ -411,7 +419,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================
     async function loadGallery() {
         try {
-            const res = await fetch("/api/gallery", { credentials: "include" });
+            const res = await fetch("/api/gallery", {
+                headers: getApiHeaders(),
+                credentials: "include"
+            });
             const data = await res.json();
             if (data.success && data.items && data.items.length > 0) {
                 galleryGrid.innerHTML = "";

@@ -807,10 +807,8 @@ body {
 }
 
 .form-disabled {
-  opacity: 0.55;
-  pointer-events: none;
+  opacity: 0.85;
   user-select: none;
-  filter: grayscale(0.2);
 }
 
 .rate-limit-warning {

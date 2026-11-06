@@ -299,11 +299,17 @@ class AdminAuthManager:
             if secrets.compare_digest(cls._sanitize_token(site_secret), cls._sanitize_token(PRIVATE_SITE_SECRET)):
                 return True
 
-        # Proxy Netlify tin cậy từ website riêng tư
-        if TRUST_NETLIFY_PROXY and req.headers.get("X-From") == "Netlify-Proxy":
-            # Chỉ cho phép nếu đã có PRIVATE_SITE_SECRET khớp HOẶC chạy trong Single-Owner Mode có credentials
-            if not PRIVATE_SITE_SECRET or (site_secret and secrets.compare_digest(cls._sanitize_token(site_secret), cls._sanitize_token(PRIVATE_SITE_SECRET))):
-                return True
+        # Proxy Netlify tin cậy từ website riêng tư của Ms. Trang
+        if TRUST_NETLIFY_PROXY:
+            is_netlify_from = req.headers.get("X-From") == "Netlify-Proxy" or req.headers.get("X-From-Netlify") == "true"
+            is_nf_id = bool(req.headers.get("X-Nf-Request-Id") or req.headers.get("x-nf-request-id"))
+            referer = req.headers.get("Referer", "")
+            origin = req.headers.get("Origin", "")
+            is_trang_site = "trangwatermaerk.netlify.app" in referer or "trangwatermaerk.netlify.app" in origin
+
+            if is_netlify_from or is_nf_id or is_trang_site:
+                if not PRIVATE_SITE_SECRET or (site_secret and secrets.compare_digest(cls._sanitize_token(site_secret), cls._sanitize_token(PRIVATE_SITE_SECRET))):
+                    return True
 
         # 4. Kiểm tra Identity Provider (Netlify Identity / SAML)
         if req.headers.get("x-nf-sub") or req.headers.get("x-netlify-user") or req.headers.get("X-Authenticated-User"):

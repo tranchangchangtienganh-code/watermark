@@ -12,7 +12,6 @@
   to = "https://watermark-nuwt.onrender.com/api/:splat"
   status = 200
   force = true
-  headers = {X-From = "Netlify-Proxy"}
 
 # Fallback for client-side routing
 [[redirects]]
