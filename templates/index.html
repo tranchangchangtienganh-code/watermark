@@ -163,15 +163,53 @@
               </select>
             </div>
 
-            <!-- Tone Màu Xám Thanh Lịch -->
+            <!-- Bảng Màu Thanh Lịch (Palette Xanh Đậm, Xanh Lợt & Xám) -->
             <div class="form-group">
-              <label class="form-label">Tông Màu Xám Thanh Lịch (Gray Palette):</label>
-              <div class="color-presets">
-                <div class="color-option selected" data-color="#708090" style="background-color: #708090;" title="Slate Gray (Khuyên Dùng)"></div>
-                <div class="color-option" data-color="#888888" style="background-color: #888888;" title="Cool Gray"></div>
-                <div class="color-option" data-color="#475569" style="background-color: #475569;" title="Deep Charcoal"></div>
-                <div class="color-option" data-color="#555555" style="background-color: #555555;" title="Dark Silver"></div>
-                <input type="color" id="customColorInput" value="#708090" style="width: 34px; height: 32px; border: none; cursor: pointer; border-radius: 4px;">
+              <label class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>🎨 Tông Màu Watermark Thanh Lịch (Elegant Palette):</span>
+                <span id="selectedColorCode" style="font-family: monospace; font-size: 11px; color: var(--primary); font-weight: 600;">#1e3a8a</span>
+              </label>
+
+              <div class="palette-container">
+                <!-- 1. Nhóm Xanh Đậm Thanh Lịch (Deep & Navy Blues) -->
+                <div class="palette-section">
+                  <span class="palette-subtitle">🔷 Tông Xanh Đậm Thanh Lịch (Deep Navy & Sapphire):</span>
+                  <div class="color-presets">
+                    <div class="color-option selected" data-color="#1e3a8a" style="background-color: #1e3a8a;" title="Navy Blue (Xanh Hải Quân Đậm - Chuẩn Mực)"></div>
+                    <div class="color-option" data-color="#0f172a" style="background-color: #0f172a;" title="Midnight Blue (Xanh Đêm Sang Trọng)"></div>
+                    <div class="color-option" data-color="#1d4ed8" style="background-color: #1d4ed8;" title="Sapphire Blue (Xanh Lam Đậm Nổi Bật)"></div>
+                    <div class="color-option" data-color="#2563eb" style="background-color: #2563eb;" title="Royal Blue (Xanh Hoàng Gia Tinh Tế)"></div>
+                    <div class="color-option" data-color="#0369a1" style="background-color: #0369a1;" title="Deep Steel Blue (Xanh Mực Thép Đậm)"></div>
+                    <div class="color-option" data-color="#0f766e" style="background-color: #0f766e;" title="Teal Blue (Xanh Cổ Vịt Quý Tộc)"></div>
+                  </div>
+                </div>
+
+                <!-- 2. Nhóm Xanh Lợt Thanh Lịch (Soft & Light Blues) -->
+                <div class="palette-section" style="margin-top: 10px;">
+                  <span class="palette-subtitle">❄️ Tông Xanh Lợt Thanh Lịch (Soft Sky & Pastel Blues):</span>
+                  <div class="color-presets">
+                    <div class="color-option" data-color="#38bdf8" style="background-color: #38bdf8;" title="Sky Blue (Xanh Da Trời Dịu Nhẹ)"></div>
+                    <div class="color-option" data-color="#60a5fa" style="background-color: #60a5fa;" title="Soft Ocean (Xanh Biển Lợt Dịu Mắt)"></div>
+                    <div class="color-option" data-color="#7dd3fc" style="background-color: #7dd3fc;" title="Ice Blue (Xanh Băng Tinh Khôi)"></div>
+                    <div class="color-option" data-color="#93c5fd" style="background-color: #93c5fd;" title="Pastel Blue (Xanh Pastel Nhẹ Nhàng)"></div>
+                    <div class="color-option" data-color="#bae6fd" style="background-color: #bae6fd;" title="Frost Blue (Xanh Khói Lợt Êm Dịu)"></div>
+                  </div>
+                </div>
+
+                <!-- 3. Nhóm Xám Cổ Điển & Màu Tự Chọn -->
+                <div class="palette-section" style="margin-top: 10px;">
+                  <span class="palette-subtitle">🔘 Tông Xám Cổ Điển & Tự Chọn:</span>
+                  <div class="color-presets">
+                    <div class="color-option" data-color="#708090" style="background-color: #708090;" title="Slate Gray (Xám Đá Phiến Cổ Điển)"></div>
+                    <div class="color-option" data-color="#888888" style="background-color: #888888;" title="Cool Gray (Xám Mát)"></div>
+                    <div class="color-option" data-color="#475569" style="background-color: #475569;" title="Deep Charcoal (Xám Than Đậm)"></div>
+                    <div class="color-option" data-color="#555555" style="background-color: #555555;" title="Dark Silver (Bạc Đậm)"></div>
+                    <div class="custom-color-picker-wrapper" title="Nhấp để tự chọn bất kỳ sắc độ màu nào khác">
+                      <input type="color" id="customColorInput" value="#1e3a8a">
+                      <span style="font-size: 11px; color: var(--text-muted); margin-left: 4px;">Tự chọn</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

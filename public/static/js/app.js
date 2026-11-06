@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnTogglePassword = document.getElementById("btnTogglePassword");
     const colorOptions = document.querySelectorAll(".color-option");
     const customColorInput = document.getElementById("customColorInput");
+    const selectedColorCode = document.getElementById("selectedColorCode");
 
     // Xem trước & Tải về
     const previewContainer = document.getElementById("previewContainer");
@@ -279,11 +280,17 @@ document.addEventListener("DOMContentLoaded", () => {
             opt.classList.add("selected");
             const color = opt.getAttribute("data-color");
             customColorInput.value = color;
+            if (selectedColorCode) {
+                selectedColorCode.textContent = color;
+            }
         });
     });
 
-    customColorInput.addEventListener("input", () => {
+    customColorInput.addEventListener("input", (e) => {
         colorOptions.forEach(o => o.classList.remove("selected"));
+        if (selectedColorCode) {
+            selectedColorCode.textContent = e.target.value;
+        }
     });
 
     // ==========================================
