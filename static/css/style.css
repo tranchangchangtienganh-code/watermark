@@ -457,6 +457,21 @@ body {
   transform: scale(1.15);
 }
 
+.color-option-white {
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1.5px #94a3b8;
+}
+
+.color-option-white:hover {
+  box-shadow: 0 0 0 2px var(--primary);
+  transform: scale(1.15);
+}
+
+.color-option-white.selected {
+  box-shadow: 0 0 0 2.5px var(--primary);
+  transform: scale(1.15);
+}
+
 .custom-color-picker-wrapper {
   display: inline-flex;
   align-items: center;

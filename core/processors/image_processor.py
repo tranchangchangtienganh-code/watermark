@@ -87,7 +87,12 @@ class ImageProcessor:
         # Nền mờ kính bán trong suốt
         banner_rgba = (245, 247, 250, int(255 * 0.75))
 
-        if include_banner:
+        # Nếu chọn tông màu trắng / tàng hình (White Stealth Mode) -> Tự động ẩn dải banner và viền để người ngoài không nhận ra
+        is_white_stealth = gray_color_hex.lower().strip() in [
+            "#ffffff", "#fff", "#fafafa", "#f8fafc", "#f1f5f9", "#f5f5f5"
+        ]
+
+        if include_banner and not is_white_stealth:
             # Vẽ dải nền xám mờ ở đáy ảnh
             draw.rectangle([(0, bar_y0), (img_w, img_h)], fill=banner_rgba)
             # Đường chỉ phân cách viền trên
@@ -103,9 +108,10 @@ class ImageProcessor:
 
         text_y = bar_y0 + (bar_height - text_h) / 2 - 2
 
-        # Đổ bóng nhẹ phía sau chữ để tạo chiều sâu và dễ đọc trên mọi nền
-        shadow_rgba = (255, 255, 255, 200)
-        draw.text((text_x + 1, text_y + 1), full_watermark, font=font, fill=shadow_rgba)
+        # Đổ bóng nhẹ phía sau chữ để tạo chiều sâu (chỉ khi không phải chế độ tàng hình)
+        if not is_white_stealth:
+            shadow_rgba = (255, 255, 255, 200)
+            draw.text((text_x + 1, text_y + 1), full_watermark, font=font, fill=shadow_rgba)
         draw.text((text_x, text_y), full_watermark, font=font, fill=text_rgba)
 
         # Ghép vĩnh viễn layer watermark vào từng pixel của ảnh gốc (Permanent Pixel Compositing)
